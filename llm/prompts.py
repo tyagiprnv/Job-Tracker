@@ -39,20 +39,35 @@ OUTPUT FORMAT (JSON):
 
 EXAMPLES:
 
-Example 1 (Real Job Email):
+Example 1 (Confirmation - Clear):
 Subject: Your application to Apple
 Body: Thank you for applying to the Senior Software Engineer position at Apple. We have received your application...
 Output: {{"is_job_related": true, "confidence": 0.95, "company": "Apple", "position": "Senior Software Engineer", "status": "Application Received", "reasoning": "Confirmation email from Apple about software engineer application"}}
 
-Example 2 (Marketplace Email - NOT JOB):
+Example 2 (Confirmation - Subtle):
+Subject: Application Confirmation
+Body: Thank you for your interest. Your application has been successfully submitted and is being reviewed.
+Output: {{"is_job_related": true, "confidence": 0.85, "company": null, "position": null, "status": "Application Received", "reasoning": "Generic confirmation email confirming application submission"}}
+
+Example 3 (Confirmation - German):
+Subject: Bewerbung eingegangen
+Body: Vielen Dank für Ihre Bewerbung. Wir haben Ihre Unterlagen erhalten...
+Output: {{"is_job_related": true, "confidence": 0.90, "company": null, "position": null, "status": "Application Received", "reasoning": "German confirmation email for received application"}}
+
+Example 4 (Marketplace Email - NOT JOB):
 Subject: You've downloaded Job Application Tracker
 Body: Thanks for downloading... Check out these templates... Price: $9.99
 Output: {{"is_job_related": false, "confidence": 0.98, "company": null, "position": null, "status": null, "reasoning": "Notion marketplace email about template product, not actual job application"}}
 
-Example 3 (Rejection):
+Example 5 (Rejection):
 Subject: Update on your application
 Body: Thank you for your interest. Unfortunately, we have decided to proceed with other candidates...
 Output: {{"is_job_related": true, "confidence": 0.92, "company": null, "position": null, "status": "Rejected", "reasoning": "Rejection email with clear decline language"}}
+
+Example 6 (Interview Invitation):
+Subject: Next steps - Interview
+Body: We'd love to schedule a phone screen to discuss the role further...
+Output: {{"is_job_related": true, "confidence": 0.94, "company": null, "position": null, "status": "Interview Scheduled", "reasoning": "Interview invitation email"}}
 
 Now analyze the email above and provide JSON output:
 """

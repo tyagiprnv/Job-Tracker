@@ -32,10 +32,20 @@ RECRUITING_PATTERNS = [
     r"hr@",
     r"noreply@.*jobs",
     r"noreply@.*careers",
+    # Additional patterns for application confirmations
+    r"noreply@.*apply",
+    r"application@",
+    r"apply@",
+    r"recruiter@",
+    r"noreply@.*recruitment",
+    r"noreply@.*hr",
     # German patterns
     r"bewerbung@",
     r"karriere@",
     r"personal@",
+    # Additional German patterns
+    r"noreply@.*bewerbung",
+    r"noreply@.*karriere",
 ]
 
 # Compile regex patterns for efficiency
@@ -134,18 +144,32 @@ STATUS_KEYWORDS = {
 # Detection keywords for identifying job emails (weighted scoring)
 DETECTION_KEYWORDS = {
     "HIGH_CONFIDENCE": [
-        # English
+        # English - General application keywords
         "job application",
         "position you applied",
         "your application for",
         "application status",
         "application for the",
-        # German
+        # English - Confirmation keywords (also used in STATUS_KEYWORDS for dual purpose)
+        "received your application",
+        "application submitted",
+        "thank you for applying",
+        "application confirmed",
+        "successfully applied",
+        "we have received your application",
+        # German - General application keywords
         "ihre bewerbung",
         "ihre anfrage",
         "bewerbungsprozess",
         "bewerbungsstatus",
         "bewerbung für",
+        # German - Confirmation keywords (also used in STATUS_KEYWORDS for dual purpose)
+        "bewerbung eingegangen",
+        "bewerbung erhalten",
+        "vielen dank für ihre bewerbung",
+        "haben ihre bewerbung erhalten",
+        "bewerbung ist bei uns eingegangen",
+        "erfolgreich beworben",
     ],
     "MEDIUM_CONFIDENCE": [
         # English

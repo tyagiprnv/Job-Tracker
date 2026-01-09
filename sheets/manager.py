@@ -143,34 +143,35 @@ class ApplicationManager:
         new_status = email.status
         current_status = current_app.current_status
 
-        # Don't update if current status is terminal
-        if current_status in TERMINAL_STATUSES:
-            print(
-                f"Skipping update for {current_app.company} - status is terminal ({current_status})"
-            )
-            # Still mark as processed
-            self.processed_emails.mark_processed(email.message_id)
-            return False
+        # Determine if status update is allowed
+        should_update_status = (
+            current_status not in TERMINAL_STATUSES
+            and self._should_update_status(current_status, new_status)
+        )
 
-        # Don't downgrade status
-        if not self._should_update_status(current_status, new_status):
-            print(
-                f"Skipping status update for {current_app.company} - would downgrade from {current_status} to {new_status}"
-            )
-            # Still update email count and dates (but preserve application_date as earliest!)
-            current_app.email_count += 1
-            current_app.latest_email_date = max(email.date, current_app.latest_email_date or email.date)
-            current_app.last_updated = email.date
-            if email.gmail_link:
-                current_app.gmail_link = email.gmail_link
-        else:
-            # Update status and other fields (preserve application_date as earliest!)
+        if should_update_status:
+            # Update status
             current_app.current_status = new_status
-            current_app.email_count += 1
-            current_app.latest_email_date = max(email.date, current_app.latest_email_date or email.date)
-            current_app.last_updated = email.date
-            if email.gmail_link:
-                current_app.gmail_link = email.gmail_link
+            print(f"Updating status for {current_app.company}: {current_status} -> {new_status}")
+        else:
+            # Status update not allowed (terminal or downgrade)
+            if current_status in TERMINAL_STATUSES:
+                print(
+                    f"Preserving terminal status for {current_app.company}: {current_status} "
+                    f"(not updating to {new_status})"
+                )
+            else:
+                print(
+                    f"Preserving status for {current_app.company}: {current_status} "
+                    f"(would downgrade to {new_status})"
+                )
+
+        # Always update metadata (regardless of status update)
+        current_app.email_count += 1
+        current_app.latest_email_date = max(email.date, current_app.latest_email_date or email.date)
+        current_app.last_updated = email.date
+        if email.gmail_link:
+            current_app.gmail_link = email.gmail_link
 
         # Update in sheet using current row number
         if current_app.row_number:

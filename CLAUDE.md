@@ -176,10 +176,12 @@ The application follows a pipeline architecture with **two analysis modes** (mai
 **Unified authentication** (config/settings.py:36-40) - Single token.json contains combined scopes for both Gmail (read-only) and Google Sheets APIs, reducing authentication friction.
 
 ### File Persistence
-**Three persistent files** in project root (all in .gitignore):
+**Five persistent files** in project root (all in .gitignore):
 - `credentials.json` - OAuth2 credentials from Google Cloud Console
 - `token.json` - OAuth2 access/refresh tokens (auto-generated)
 - `llm_cache.json` - LLM analysis cache (auto-generated, saves API costs)
+- `processed_emails.json` - Tracking file for processed email IDs (auto-generated, use `--reset-tracking` to clear)
+- `false_positives.json` - Tracking file for deleted applications (auto-generated, use `--reset-tracking` to clear)
 
 ### Gmail Thread Tracking
 Thread IDs are preserved in applications to enable perfect matching of follow-up emails in the same conversation thread (matching/matcher.py:54-70).
@@ -227,15 +229,30 @@ uv run python main.py --reset-tracking
 - `llm_cache.json` - LLM analysis cache (saves API costs on re-runs)
 
 **When to use:**
-- Switching to a new spreadsheet (change `SPREADSHEET_ID` in `.env`)
-- Testing with a fresh slate
-- After manual spreadsheet cleanup
+- **Switching to a new spreadsheet** (change `SPREADSHEET_ID` in `.env`)
+- **After updating detection logic** (code updates that improve email detection)
+- **When confirmation emails were missed** (re-process to detect previously missed application confirmations)
+- **Testing with a fresh slate** (verify detection and matching work correctly)
+- **After manual spreadsheet cleanup** (removed rows should be recreated if still relevant)
+- **When application dates are incorrect** (emails processed in wrong order, need reprocessing)
 
 **After reset:**
-Run normal processing to populate the new spreadsheet:
+Run normal processing to populate the spreadsheet with newly detected emails:
 ```bash
+# Re-process last 60 days with improved detection
 uv run python main.py --days 60
+
+# Or test first with dry-run to preview changes
+uv run python main.py --days 60 --dry-run
 ```
+
+**Example use case:**
+If you notice application dates showing rejection dates instead of initial application dates:
+```bash
+# Reset tracking and re-process - confirmation emails will now be detected
+uv run python main.py --reset-tracking --days 60
+```
+This is especially useful after detection keyword updates that improve confirmation email detection.
 
 ### Detection Too Strict/Loose (Rules Mode)
 Edit `DETECTION_THRESHOLD` in `.env`:

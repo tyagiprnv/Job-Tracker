@@ -122,6 +122,9 @@ def main(days: int, dry_run: bool, mode: str, reset_tracking: bool):
             parser = EmailParser()
             emails = parser.parse_messages(messages)
 
+            # Sort emails by date (oldest first) to ensure natural status progression
+            emails.sort(key=lambda e: e.date)
+
             # Step 3: Analyze emails (LLM or rules-based)
             if mode == "llm":
                 progress.update(task, description="Analyzing emails with LLM...")

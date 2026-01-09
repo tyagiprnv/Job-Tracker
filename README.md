@@ -130,6 +130,7 @@ uv run python main.py --mode rules --days 15 --dry-run
 - `--mode`: Analysis mode - `llm` (AI-powered, default) or `rules` (traditional)
 - `--days`: Number of days to search back for emails (default: 60)
 - `--dry-run`: Preview mode - show what would be detected without updating the sheet
+- `--reset-tracking`: Reset tracking files when switching spreadsheets (see below)
 - `--help`: Show help message
 
 ### Choosing Between LLM and Rules Mode
@@ -146,11 +147,47 @@ uv run python main.py --mode rules --days 15 --dry-run
 - You're okay with lower accuracy and some false positives
 - You want faster processing (no API calls)
 
+### Resetting Tracking Files (Switching Spreadsheets)
+
+When switching to a new spreadsheet, tracking files from the old spreadsheet can cause all emails to be skipped. Use the reset command:
+
+```bash
+# Reset tracking files (deletes processed_emails.json and false_positives.json)
+uv run python main.py --reset-tracking
+```
+
+**What gets reset:**
+- `processed_emails.json` - Message IDs that have been processed (allows re-processing all emails)
+- `false_positives.json` - Applications that were deleted (allows re-creating them)
+
+**What is preserved:**
+- `llm_cache.json` - LLM analysis cache (saves API costs on re-runs)
+
+**When to use:**
+- **Switching to a new spreadsheet** (change `SPREADSHEET_ID` in `.env`)
+- **After updating detection logic** (code updates that improve email detection)
+- **When confirmation emails were missed** (re-process to detect previously missed application confirmations)
+- **Testing with a fresh slate** (verify detection and matching work correctly)
+- **After manual spreadsheet cleanup** (removed rows should be recreated if still relevant)
+- **When application dates are incorrect** (emails processed in wrong order, need reprocessing)
+
+**After reset:**
+Run normal processing to populate the spreadsheet with newly detected emails:
+```bash
+# Re-process last 60 days with improved detection
+uv run python main.py --days 60
+
+# Or test first with dry-run to preview changes
+uv run python main.py --days 60 --dry-run
+```
+
 ### Example Output
 
 ```
                     Job Application Tracker
                 Scanning Gmail for job-related emails...
+
+[LLM Mode] Loaded 490 cached results from llm_cache.json
 
 Found 15 job-related emails
 
@@ -162,6 +199,7 @@ Summary:
 │ Job-related emails found   │    15 │
 │ New applications created   │     8 │
 │ Applications updated       │     7 │
+│ LLM API calls made         │    33 │  (only new emails analyzed)
 └────────────────────────────┴───────┘
 
 ✓ Successfully updated spreadsheet: 1abc123...
@@ -178,6 +216,7 @@ SPREADSHEET_ID=your_spreadsheet_id_here
 # DeepSeek API Configuration (for LLM mode)
 DEEPSEEK_API_KEY=sk-your-api-key-here  # Get from platform.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat           # deepseek-chat or deepseek-coder
+LLM_CACHE_FILE=llm_cache.json          # Path to persistent cache file
 
 # Gmail Search Configuration
 GMAIL_SEARCH_DAYS=60         # How many days back to search
@@ -214,6 +253,15 @@ When using `--mode llm`, the tracker uses DeepSeek's AI model to analyze each em
 - Better rejection detection: Understands subtle rejection language
 - Multilingual by default: No separate rules for German
 - Handles edge cases: Assessments from third parties, multi-thread applications
+
+**Persistent Cache:**
+- Results cached to `llm_cache.json` and persist across runs
+- Cache loaded on startup - previously analyzed emails never re-analyzed
+- Massive cost savings: Only new emails incur API costs
+  - Day 1: 500 emails → $0.05
+  - Day 2: 490 cached, 10 new → $0.001
+  - Day 3: 498 cached, 2 new → $0.0002
+- Survives `--reset-tracking` - cache is preserved when switching spreadsheets
 
 **Fallback:** If API fails, automatically falls back to rules-based detection
 
@@ -319,6 +367,28 @@ Increase `DETECTION_THRESHOLD` to be more strict (e.g., 6-7) or use `--mode llm`
 
 If using LLM mode, add your DeepSeek API key to `.env`. Or use `--mode rules` to run without API key.
 
+### Managing LLM Cache
+
+The LLM cache grows over time as new emails are analyzed. To manage:
+
+```bash
+# View cache size
+ls -lh llm_cache.json
+
+# Clear cache (force re-analysis of all emails)
+rm llm_cache.json
+
+# Note: Cache is preserved during --reset-tracking
+# Delete manually if you want to force re-analysis
+```
+
+**When to clear the cache:**
+- Testing LLM prompt changes (want to see new analysis results)
+- Corrupted cache file (parser errors)
+- Want to use updated LLM model on old emails
+
+**Cost impact:** Clearing cache means all emails will be re-analyzed on next run, incurring API costs again (~$0.01 per 100 emails).
+
 ## Project Structure
 
 ```
@@ -336,6 +406,13 @@ job-tracker/
 ├── matching/               # Application matching logic
 ├── models/                 # Data models
 └── utils/                  # Utility functions
+
+# Auto-generated files (in .gitignore):
+├── credentials.json         # OAuth2 credentials (manual download from GCP)
+├── token.json              # OAuth2 access tokens (auto-generated on first run)
+├── llm_cache.json          # LLM analysis cache (auto-generated, persistent)
+├── processed_emails.json   # Processed message IDs (use --reset-tracking to clear)
+└── false_positives.json    # False positives tracker (use --reset-tracking to clear)
 ```
 
 ## Contributing
