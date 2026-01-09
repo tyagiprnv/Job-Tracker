@@ -7,6 +7,8 @@ from sheets.client import SheetsClient
 from models.application import Application
 from models.email import Email
 from config.settings import TERMINAL_STATUSES, STATUS_VALUES
+from detection.false_positives import FalsePositivesTracker
+from tracking.processed_emails import ProcessedEmailsTracker
 
 
 class ApplicationManager:
@@ -20,6 +22,8 @@ class ApplicationManager:
         """
         self.client = SheetsClient(spreadsheet_id) if spreadsheet_id else SheetsClient()
         self.client.open_spreadsheet()
+        self.false_positives = FalsePositivesTracker()
+        self.processed_emails = ProcessedEmailsTracker()
 
     def get_all_applications(self) -> list[Application]:
         """Get all applications from sheet.
@@ -42,15 +46,33 @@ class ApplicationManager:
 
         return applications
 
-    def create_application(self, email: Email) -> Application:
+    def create_application(self, email: Email) -> Optional[Application]:
         """Create new application from email.
 
         Args:
             email: Email object with extracted info
 
         Returns:
-            Application: Created application object
+            Application: Created application object, or None if false positive or already processed
         """
+        # Check if this email was already processed
+        if self.processed_emails.is_processed(email.message_id):
+            print(
+                f"Skipping already processed email: {email.company} - {email.position} "
+                f"(message: {email.message_id[:8]}...)"
+            )
+            return None
+
+        # Check if this is a known false positive
+        if self.false_positives.is_false_positive(
+            email.message_id, email.company or "Unknown", email.position or "Unknown Position"
+        ):
+            print(
+                f"Skipping false positive: {email.company} - {email.position} "
+                f"(previously deleted by user)"
+            )
+            return None
+
         application = Application(
             company=email.company or "Unknown",
             position=email.position or "Unknown Position",
@@ -66,54 +88,101 @@ class ApplicationManager:
 
         # Add to sheet
         self.client.append_row(application.to_row())
+
+        # Mark email as processed
+        self.processed_emails.mark_processed(email.message_id)
+
         print(f"Created: {application.company} - {application.position}")
 
         return application
 
-    def update_application(self, application: Application, email: Email):
+    def update_application(self, application: Application, email: Email) -> bool:
         """Update existing application with new email.
 
         Args:
             application: Existing application
             email: New email
+
+        Returns:
+            bool: True if update was performed, False if skipped
         """
+        # Check if this email was already processed
+        if self.processed_emails.is_processed(email.message_id):
+            print(
+                f"Skipping already processed email: {application.company} - {application.position} "
+                f"(message: {email.message_id[:8]}...)"
+            )
+            return False
+
+        # Re-find the application to get current row number and fresh data
+        # (in case rows were manually deleted/reordered)
+        current_app = self._find_application_by_identity(application)
+
+        if not current_app:
+            # Application was manually deleted - record as false positive
+            print(
+                f"Warning: {application.company} - {application.position} was manually deleted. "
+                f"Recording as false positive (won't be re-created)."
+            )
+            self.false_positives.add_false_positive(
+                email.message_id,
+                application.company,
+                application.position,
+            )
+            # Mark as processed so we don't keep trying
+            self.processed_emails.mark_processed(email.message_id)
+            return False
+
+        # Work with fresh data from spreadsheet (current_app)
+        # IMPORTANT: Preserve application_date and ensure it's the EARLIEST date
+        if email.date < current_app.application_date:
+            # This email is earlier than our current application date - update to earliest
+            current_app.application_date = email.date
+
         # Check if status should be updated
         new_status = email.status
-        current_status = application.current_status
+        current_status = current_app.current_status
 
         # Don't update if current status is terminal
         if current_status in TERMINAL_STATUSES:
             print(
-                f"Skipping update for {application.company} - status is terminal ({current_status})"
+                f"Skipping update for {current_app.company} - status is terminal ({current_status})"
             )
-            return
+            # Still mark as processed
+            self.processed_emails.mark_processed(email.message_id)
+            return False
 
         # Don't downgrade status
         if not self._should_update_status(current_status, new_status):
             print(
-                f"Skipping status update for {application.company} - would downgrade from {current_status} to {new_status}"
+                f"Skipping status update for {current_app.company} - would downgrade from {current_status} to {new_status}"
             )
-            # Still update email count and date
-            application.email_count += 1
-            application.latest_email_date = email.date
-            application.last_updated = email.date
+            # Still update email count and dates (but preserve application_date as earliest!)
+            current_app.email_count += 1
+            current_app.latest_email_date = max(email.date, current_app.latest_email_date or email.date)
+            current_app.last_updated = email.date
             if email.gmail_link:
-                application.gmail_link = email.gmail_link
+                current_app.gmail_link = email.gmail_link
         else:
-            # Update status and other fields
-            application.current_status = new_status
-            application.email_count += 1
-            application.latest_email_date = email.date
-            application.last_updated = email.date
+            # Update status and other fields (preserve application_date as earliest!)
+            current_app.current_status = new_status
+            current_app.email_count += 1
+            current_app.latest_email_date = max(email.date, current_app.latest_email_date or email.date)
+            current_app.last_updated = email.date
             if email.gmail_link:
-                application.gmail_link = email.gmail_link
+                current_app.gmail_link = email.gmail_link
 
-        # Update in sheet
-        if application.row_number:
-            self.client.update_row(application.row_number, application.to_row())
+        # Update in sheet using current row number
+        if current_app.row_number:
+            self.client.update_row(current_app.row_number, current_app.to_row())
             print(
-                f"Updated: {application.company} - {application.position} -> {application.current_status}"
+                f"Updated: {current_app.company} - {current_app.position} -> {current_app.current_status}"
             )
+
+        # Mark email as processed
+        self.processed_emails.mark_processed(email.message_id)
+
+        return True
 
     def _should_update_status(self, current: str, new: str) -> bool:
         """Check if status should be updated.
@@ -162,4 +231,38 @@ class ApplicationManager:
             if app.company.lower() == company.lower() and app.position.lower() == position.lower():
                 return app
 
+        return None
+
+    def _find_application_by_identity(
+        self, application: Application
+    ) -> Optional[Application]:
+        """Re-find application in current spreadsheet state.
+
+        Uses thread_id (if available) or company+position to locate the application.
+        This ensures we get the current row number even if rows were manually changed.
+
+        Args:
+            application: Application to find
+
+        Returns:
+            Application: Found application with current row number, or None if deleted
+        """
+        # Re-read spreadsheet to get current state
+        current_apps = self.get_all_applications()
+
+        # Try to match by thread_id first (most reliable)
+        if application.thread_id:
+            for app in current_apps:
+                if app.thread_id == application.thread_id:
+                    return app
+
+        # Fall back to company + position match
+        for app in current_apps:
+            if (
+                app.company.lower() == application.company.lower()
+                and app.position.lower() == application.position.lower()
+            ):
+                return app
+
+        # Application not found (may have been manually deleted)
         return None

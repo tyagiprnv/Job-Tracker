@@ -219,6 +219,7 @@ dependencies = [
     { name = "python-dateutil" },
     { name = "python-dotenv" },
     { name = "rapidfuzz" },
+    { name = "requests" },
     { name = "rich" },
 ]
 
@@ -235,6 +236,7 @@ requires-dist = [
     { name = "python-dateutil", specifier = ">=2.8.2" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "rapidfuzz", specifier = ">=3.6.0" },
+    { name = "requests", specifier = ">=2.31.0" },
     { name = "rich", specifier = ">=13.7.0" },
 ]
 

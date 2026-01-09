@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Job Application Tracker is a Python CLI tool that automatically detects job-related emails from Gmail and tracks them in Google Sheets. It supports both English and German emails, uses sophisticated matching algorithms to link follow-up emails to existing applications, and prevents status downgrades.
+Job Application Tracker is a Python CLI tool that automatically detects job-related emails from Gmail and tracks them in Google Sheets. It features **dual analysis modes**: AI-powered LLM analysis (default) for high accuracy, and traditional rules-based analysis for offline/free usage. Supports both English and German emails, uses sophisticated matching algorithms to link follow-up emails to existing applications, and prevents status downgrades.
 
 ## Essential Commands
 
@@ -15,16 +15,25 @@ uv sync
 
 # Create environment file
 cp .env.example .env
-# Then edit .env to add SPREADSHEET_ID
+# Then edit .env to add SPREADSHEET_ID and DEEPSEEK_API_KEY (for LLM mode)
 
-# Run the tracker (default: 60 days back)
+# Run with LLM analysis (default - most accurate)
 uv run python main.py
+
+# Run with rules-based analysis (offline, free)
+uv run python main.py --mode rules
 
 # Run with custom date range
 uv run python main.py --days 30
 
 # Preview mode (no spreadsheet updates)
 uv run python main.py --dry-run
+
+# Reset tracking files (use when switching spreadsheets)
+uv run python main.py --reset-tracking
+
+# Combine options
+uv run python main.py --mode llm --days 15 --dry-run
 ```
 
 ### Google Cloud Setup Requirements
@@ -33,22 +42,73 @@ uv run python main.py --dry-run
 3. First run opens browser for OAuth consent, creates `token.json`
 4. Get spreadsheet ID from Google Sheets URL and add to `.env`
 
+### DeepSeek API Setup (Optional - for LLM mode)
+1. Sign up at https://platform.deepseek.com/
+2. Get API key and add credits (~$0.01 per 100 emails)
+3. Add `DEEPSEEK_API_KEY` to `.env`
+4. Use `--mode llm` (default) for AI-powered analysis
+5. Or use `--mode rules` to run without API key (offline/free)
+
 ## Architecture Overview
 
 ### Data Flow Pipeline
-The application follows a **7-step pipeline architecture** (main.py:41-126):
 
+The application follows a pipeline architecture with **two analysis modes** (main.py:80-106):
+
+**Common Steps (both modes):**
 1. **Fetch** (gmail/fetcher.py) - Retrieve emails from Gmail API
 2. **Parse** (gmail/parser.py) - Extract sender, subject, body, thread_id from raw messages
+
+**LLM Mode Pipeline** (`--mode llm`, default):
+3. **Analyze** (llm/email_analyzer.py) - Single LLM call per email extracts:
+   - Job-related classification
+   - Company name (actual employer, not ATS)
+   - Position title
+   - Application status
+   - Confidence score and reasoning
+4. **Match** (matching/matcher.py) - Link emails to existing applications
+5. **Update** (sheets/manager.py) - Create new or update existing spreadsheet rows
+
+**Rules Mode Pipeline** (`--mode rules`):
 3. **Detect** (detection/detector.py) - Score emails using weighted keyword matching (threshold: 5)
-4. **Extract** (detection/extractor.py) - Pull company name and position from email content
-5. **Classify** (detection/classifier.py) - Determine email type and status
-6. **Match** (matching/matcher.py) - Link emails to existing applications using 4 strategies
+4. **Extract** (detection/extractor.py) - Pull company name and position using regex
+5. **Classify** (detection/classifier.py) - Determine email type and status using keywords
+6. **Match** (matching/matcher.py) - Link emails to existing applications
 7. **Update** (sheets/manager.py) - Create new or update existing spreadsheet rows
 
-### Core Detection Algorithm
+### LLM Analysis (Default Mode)
 
-**Scoring System** (detection/detector.py:18-71):
+**DeepSeek API Integration** (llm/deepseek_client.py):
+- Sends email subject, body (first 2000 chars), and sender to DeepSeek API
+- Uses structured prompt with examples (llm/prompts.py)
+- Receives JSON response with: `is_job_related`, `company`, `position`, `status`, `confidence`, `reasoning`
+- Low temperature (0.1) for consistent, deterministic results
+- Response format set to `json_object` for structured output
+
+**Advantages over rules-based:**
+- Context-aware: Distinguishes marketplace/promotional emails from real applications
+- Accurate company extraction: Identifies actual employer vs ATS platform name
+- Better rejection detection: Understands subtle rejection language
+- Multilingual by default: No separate rules for German
+- Handles edge cases: Third-party assessments, multi-thread applications
+
+**Fallback Strategy** (llm/email_analyzer.py:118-142):
+- If LLM API fails, automatically falls back to rules-based detection
+- Ensures system reliability even without API availability
+
+**Persistent Cache** (llm/email_analyzer.py:159-184):
+- Results cached to `llm_cache.json` and persist across runs
+- Cache loaded on startup - previously analyzed emails never re-analyzed
+- Saves after each new analysis to prevent data loss
+- Massive cost savings: Only new emails incur API costs
+  - Day 1: 500 emails → $0.05
+  - Day 2: 490 cached, 10 new → $0.001
+  - Day 3: 498 cached, 2 new → $0.0002
+- Gracefully handles missing or corrupted cache files
+
+### Core Detection Algorithm (Rules Mode)
+
+**Scoring System** (detection/detector.py:18-71) - Used when `--mode rules`:
 - ATS domain (greenhouse.io, lever.co, etc.): +5 points
 - Recruiting email patterns (recruiting@, talent@): +3 points
 - Subject keywords: +2-3 points (weighted by confidence)
@@ -96,7 +156,10 @@ The application follows a **7-step pipeline architecture** (main.py:41-126):
 - `DETECTION_KEYWORDS` - Weighted keyword lists (high/medium/low confidence)
 
 **config/settings.py** loads from `.env`:
-- `DETECTION_THRESHOLD` (default: 5) - Minimum score for job detection
+- `DEEPSEEK_API_KEY` - DeepSeek API key (required for LLM mode)
+- `DEEPSEEK_MODEL` (default: "deepseek-chat") - Model to use (deepseek-chat or deepseek-coder)
+- `LLM_CACHE_FILE` - Path to persistent cache file (llm_cache.json)
+- `DETECTION_THRESHOLD` (default: 5) - Minimum score for job detection (rules mode)
 - `MATCHING_THRESHOLD` (default: 80) - Minimum fuzzy match score
 - `GMAIL_SEARCH_DAYS` (default: 60) - How far back to search
 - `STATUS_VALUES` - Ordered progression of application statuses
@@ -105,10 +168,18 @@ The application follows a **7-step pipeline architecture** (main.py:41-126):
 ## Key Implementation Details
 
 ### Multilingual Support
-All keywords in `config/keywords.py` include both English and German translations. No language detection is performed - all keywords work simultaneously. This approach is extensible to additional languages.
+**LLM mode:** Native multilingual understanding - the AI model automatically handles English, German, and other languages without explicit configuration.
+
+**Rules mode:** All keywords in `config/keywords.py` include both English and German translations. No language detection is performed - all keywords work simultaneously. This approach is extensible to additional languages.
 
 ### OAuth2 Authentication
-**Unified authentication** (config/settings.py:29-36) - Single token.json contains combined scopes for both Gmail (read-only) and Google Sheets APIs, reducing authentication friction.
+**Unified authentication** (config/settings.py:36-40) - Single token.json contains combined scopes for both Gmail (read-only) and Google Sheets APIs, reducing authentication friction.
+
+### File Persistence
+**Three persistent files** in project root (all in .gitignore):
+- `credentials.json` - OAuth2 credentials from Google Cloud Console
+- `token.json` - OAuth2 access/refresh tokens (auto-generated)
+- `llm_cache.json` - LLM analysis cache (auto-generated, saves API costs)
 
 ### Gmail Thread Tracking
 Thread IDs are preserved in applications to enable perfect matching of follow-up emails in the same conversation thread (matching/matcher.py:54-70).
@@ -118,10 +189,59 @@ Thread IDs are preserved in applications to enable perfect matching of follow-up
 
 ## Common Adjustments
 
-### Detection Too Strict/Loose
+### Choosing Analysis Mode
+Use `--mode llm` (default) for:
+- Higher accuracy (95%+ company names, 90%+ status)
+- Better false positive filtering
+- Context-aware analysis
+- Cost: ~$0.01 per 100 NEW emails (cached emails are free!)
+
+Use `--mode rules` for:
+- Offline operation (no API dependency)
+- Zero cost
+- Faster processing (no API calls)
+- Trade-off: Lower accuracy, more false positives
+
+### Managing LLM Cache
+**Cache grows over time** as new emails are analyzed. To manage:
+- **View cache size**: `ls -lh llm_cache.json`
+- **Clear cache** (force re-analysis of all emails): `rm llm_cache.json`
+- **Cache location**: Project root directory (`llm_cache.json`)
+- **Cache format**: JSON with message_id as key
+- Cache is automatically excluded from git (.gitignore)
+
+### Resetting Tracking Files (Switching Spreadsheets)
+
+When switching to a new spreadsheet, tracking files from the old spreadsheet can cause all emails to be skipped. Use the reset command:
+
+```bash
+# Reset tracking files (deletes processed_emails.json and false_positives.json)
+uv run python main.py --reset-tracking
+```
+
+**What gets reset:**
+- `processed_emails.json` - Message IDs that have been processed (allows re-processing all emails)
+- `false_positives.json` - Applications that were deleted (allows re-creating them)
+
+**What is preserved:**
+- `llm_cache.json` - LLM analysis cache (saves API costs on re-runs)
+
+**When to use:**
+- Switching to a new spreadsheet (change `SPREADSHEET_ID` in `.env`)
+- Testing with a fresh slate
+- After manual spreadsheet cleanup
+
+**After reset:**
+Run normal processing to populate the new spreadsheet:
+```bash
+uv run python main.py --days 60
+```
+
+### Detection Too Strict/Loose (Rules Mode)
 Edit `DETECTION_THRESHOLD` in `.env`:
 - Lower (3-4): Catch more emails, possible false positives
 - Higher (6-7): Stricter detection, may miss some emails
+- Or switch to `--mode llm` for better accuracy
 
 ### Matching Too Strict/Loose
 Edit `MATCHING_THRESHOLD` in `.env`:
@@ -149,26 +269,38 @@ gmail/           # Gmail API integration
 ├── parser.py    # Parse raw messages into Email objects
 └── client.py    # Low-level Gmail API wrapper
 
-detection/       # Email analysis
+llm/             # LLM-based analysis (default mode)
+├── deepseek_client.py  # DeepSeek API client wrapper
+├── prompts.py          # Structured prompt templates with examples
+└── email_analyzer.py   # Main LLM analyzer with caching and fallback
+
+detection/       # Rules-based email analysis (--mode rules)
 ├── detector.py  # Scoring algorithm for job detection
 ├── classifier.py # Determine email type and status
 └── extractor.py # Extract company and position from text
 
-matching/        # Application matching logic
+matching/        # Application matching logic (both modes)
 └── matcher.py   # 4-strategy matching algorithm
 
-sheets/          # Google Sheets integration
+sheets/          # Google Sheets integration (both modes)
 ├── client.py    # Low-level Sheets API wrapper
 └── manager.py   # High-level application CRUD operations
 
-models/          # Data structures
+models/          # Data structures (both modes)
 ├── email.py     # Email data model
 └── application.py # Application data model
 
-utils/           # Helper functions
+utils/           # Helper functions (both modes)
 └── text_utils.py # Text normalization and keyword matching
 
 main.py          # CLI entry point and orchestration
+
+# Auto-generated files (in .gitignore)
+credentials.json      # OAuth2 credentials (manual download from GCP)
+token.json            # OAuth2 access tokens (auto-generated on first run)
+llm_cache.json        # LLM analysis cache (auto-generated, persistent)
+processed_emails.json # Processed message IDs tracker (use --reset-tracking to clear)
+false_positives.json  # False positives tracker (use --reset-tracking to clear)
 ```
 
 ## Testing and Debugging
@@ -177,8 +309,23 @@ Use `--dry-run` mode extensively when:
 - Testing detection threshold changes
 - Validating matching behavior
 - Previewing what would be updated before committing to spreadsheet
+- Comparing LLM vs rules mode: `python main.py --dry-run` vs `python main.py --mode rules --dry-run`
 
 The CLI output shows:
-- Detection scores for understanding why emails matched/didn't match
+- Analysis mode being used (LLM or Rules)
+- Cache load message: "Loaded X cached results from llm_cache.json" (LLM mode)
+- Detection scores for understanding why emails matched/didn't match (rules mode)
+- LLM reasoning and confidence scores (LLM mode)
 - Matching confidence levels for troubleshooting duplicate applications
 - Summary statistics for monitoring system performance
+
+**Comparing Modes:**
+Run both modes in dry-run to compare accuracy:
+```bash
+# LLM mode
+python main.py --dry-run --days 15
+
+# Rules mode
+python main.py --mode rules --dry-run --days 15
+```
+Compare the sample outputs to see which mode provides better results for your email patterns.

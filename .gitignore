@@ -14,5 +14,14 @@ credentials.json
 token.json
 .env
 
+# LLM cache
+llm_cache.json
+
+# False positives tracking
+false_positives.json
+
+# Processed emails tracking
+processed_emails.json
+
 # Logs
 *.log

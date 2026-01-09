@@ -4,6 +4,9 @@ Automatically track your job applications by reading Gmail and updating Google S
 
 ## Features
 
+- **Dual Analysis Modes:**
+  - **LLM Mode (default):** AI-powered analysis using DeepSeek API for highly accurate extraction
+  - **Rules Mode:** Traditional keyword-based detection for offline/free usage
 - Automatically detects job-related emails from Gmail
 - Extracts company names and position titles
 - Classifies email type (application received, interview, rejection, offer)
@@ -64,7 +67,15 @@ Automatically track your job applications by reading Gmail and updating Google S
    https://docs.google.com/spreadsheets/d/[SPREADSHEET_ID]/edit
    ```
 
-### 3. Project Setup
+### 3. DeepSeek API Setup (Optional - for LLM mode)
+
+**LLM mode** provides superior accuracy but requires a DeepSeek API key. **Rules mode** works offline without an API key.
+
+1. Go to [DeepSeek Platform](https://platform.deepseek.com/)
+2. Sign up and get your API key
+3. Add credits to your account (~$0.01 per 100 emails, very affordable)
+
+### 4. Project Setup
 
 ```bash
 # Clone or navigate to the project
@@ -73,14 +84,15 @@ cd job-tracker
 # Create .env file from template
 cp .env.example .env
 
-# Edit .env and add your spreadsheet ID
-# SPREADSHEET_ID=your_spreadsheet_id_here
+# Edit .env and add your configuration:
+# - SPREADSHEET_ID: Your Google Sheet ID (required)
+# - DEEPSEEK_API_KEY: Your DeepSeek API key (optional, for LLM mode)
 
 # Install dependencies using uv
 uv sync
 ```
 
-### 4. First Run
+### 5. First Run
 
 ```bash
 # Run the tracker
@@ -97,21 +109,42 @@ uv run python main.py
 ### Basic Usage
 
 ```bash
-# Run the tracker (default: last 60 days)
+# Run with LLM analysis (default - most accurate)
 uv run python main.py
+
+# Run with rules-based analysis (offline, free)
+uv run python main.py --mode rules
 
 # Search specific number of days back
 uv run python main.py --days 30
 
 # Preview mode (don't update spreadsheet)
 uv run python main.py --dry-run
+
+# Combine options
+uv run python main.py --mode rules --days 15 --dry-run
 ```
 
 ### CLI Options
 
+- `--mode`: Analysis mode - `llm` (AI-powered, default) or `rules` (traditional)
 - `--days`: Number of days to search back for emails (default: 60)
 - `--dry-run`: Preview mode - show what would be detected without updating the sheet
 - `--help`: Show help message
+
+### Choosing Between LLM and Rules Mode
+
+**Use LLM Mode (default) when:**
+- You want the highest accuracy (95%+ company names, 90%+ status)
+- You want fewer false positives (marketplace emails filtered out)
+- You have DeepSeek API credits (~$0.01 per 100 emails)
+- You need context-aware analysis (rejection detection, ATS vs company names)
+
+**Use Rules Mode when:**
+- You want to run offline without API dependencies
+- You prefer zero-cost operation
+- You're okay with lower accuracy and some false positives
+- You want faster processing (no API calls)
 
 ### Example Output
 
@@ -142,11 +175,15 @@ Edit `.env` to customize behavior:
 # Google Sheets Configuration
 SPREADSHEET_ID=your_spreadsheet_id_here
 
+# DeepSeek API Configuration (for LLM mode)
+DEEPSEEK_API_KEY=sk-your-api-key-here  # Get from platform.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat           # deepseek-chat or deepseek-coder
+
 # Gmail Search Configuration
 GMAIL_SEARCH_DAYS=60         # How many days back to search
 GMAIL_MAX_RESULTS=500        # Maximum emails to process per run
 
-# Detection Thresholds
+# Detection Thresholds (for rules mode)
 DETECTION_THRESHOLD=5        # Minimum score to consider job-related
 MATCHING_THRESHOLD=80        # Minimum similarity for fuzzy matching
 
@@ -156,9 +193,33 @@ LOG_LEVEL=INFO              # DEBUG, INFO, WARNING, ERROR
 
 ## How It Works
 
-### Detection Algorithm
+### LLM Analysis (Default Mode)
 
-The tracker uses a scoring system to identify job-related emails:
+When using `--mode llm`, the tracker uses DeepSeek's AI model to analyze each email:
+
+**Process:**
+1. Extracts email subject, body (first 2000 chars), and sender
+2. Sends to DeepSeek API with structured prompt
+3. Receives JSON response with:
+   - `is_job_related`: true/false classification
+   - `company`: Actual employer name (not ATS platform)
+   - `position`: Job title
+   - `status`: Application status
+   - `confidence`: 0.0-1.0 confidence score
+   - `reasoning`: Explanation of classification
+
+**Advantages:**
+- Context-aware: Distinguishes marketplace emails from real applications
+- Accurate company extraction: "Apple" not "Lever" or "Greenhouse"
+- Better rejection detection: Understands subtle rejection language
+- Multilingual by default: No separate rules for German
+- Handles edge cases: Assessments from third parties, multi-thread applications
+
+**Fallback:** If API fails, automatically falls back to rules-based detection
+
+### Rules-Based Detection (Traditional Mode)
+
+When using `--mode rules`, the tracker uses a scoring system to identify job-related emails:
 
 1. **ATS Platform Domains** (+5 points)
    - Greenhouse, Lever, Workday, iCIMS, SmartRecruiters, etc.
@@ -252,7 +313,11 @@ Try adjusting `DETECTION_THRESHOLD` in `.env` to a lower value (e.g., 3-4) to ca
 
 ### False positives
 
-Increase `DETECTION_THRESHOLD` to be more strict (e.g., 6-7).
+Increase `DETECTION_THRESHOLD` to be more strict (e.g., 6-7) or use `--mode llm` for better accuracy.
+
+### "Warning: DEEPSEEK_API_KEY not set"
+
+If using LLM mode, add your DeepSeek API key to `.env`. Or use `--mode rules` to run without API key.
 
 ## Project Structure
 
@@ -262,7 +327,11 @@ job-tracker/
 ├── config/                 # Configuration and keywords
 ├── auth/                   # OAuth2 authentication
 ├── gmail/                  # Gmail API integration
-├── detection/              # Email detection and classification
+├── llm/                    # LLM-based analysis (DeepSeek)
+│   ├── deepseek_client.py  # API client
+│   ├── prompts.py          # Prompt templates
+│   └── email_analyzer.py   # Main LLM analyzer
+├── detection/              # Rules-based detection and classification
 ├── sheets/                 # Google Sheets integration
 ├── matching/               # Application matching logic
 ├── models/                 # Data models

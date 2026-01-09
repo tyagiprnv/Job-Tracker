@@ -8,6 +8,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from config.settings import SPREADSHEET_ID, GMAIL_SEARCH_DAYS
 from gmail.fetcher import EmailFetcher
 from gmail.parser import EmailParser
+from llm.email_analyzer import LLMEmailAnalyzer
 from detection.detector import JobEmailDetector
 from detection.extractor import InfoExtractor
 from detection.classifier import EmailClassifier
@@ -29,13 +30,67 @@ console = Console()
     is_flag=True,
     help="Run without updating the spreadsheet (preview mode)",
 )
-def main(days: int, dry_run: bool):
+@click.option(
+    "--mode",
+    default="llm",
+    type=click.Choice(["llm", "rules"], case_sensitive=False),
+    help="Analysis mode: 'llm' for AI-powered analysis (default), 'rules' for traditional rule-based",
+)
+@click.option(
+    "--reset-tracking",
+    is_flag=True,
+    help="Delete tracking files (processed_emails.json, false_positives.json) and exit. Use when switching spreadsheets.",
+)
+def main(days: int, dry_run: bool, mode: str, reset_tracking: bool):
     """Job Application Tracker - Automatically track job applications from Gmail."""
+
+    # Handle reset tracking flag first (early exit)
+    if reset_tracking:
+        from config.settings import PROCESSED_EMAILS_FILE, FALSE_POSITIVES_FILE
+
+        console.print("\n[bold yellow]Resetting tracking files...[/bold yellow]\n")
+
+        files_deleted = []
+        files_not_found = []
+
+        # Delete processed_emails.json
+        if PROCESSED_EMAILS_FILE.exists():
+            PROCESSED_EMAILS_FILE.unlink()
+            files_deleted.append("processed_emails.json")
+        else:
+            files_not_found.append("processed_emails.json")
+
+        # Delete false_positives.json
+        if FALSE_POSITIVES_FILE.exists():
+            FALSE_POSITIVES_FILE.unlink()
+            files_deleted.append("false_positives.json")
+        else:
+            files_not_found.append("false_positives.json")
+
+        # Display results
+        if files_deleted:
+            console.print("[green]✓ Deleted:[/green]")
+            for file in files_deleted:
+                console.print(f"  - {file}")
+
+        if files_not_found:
+            console.print("\n[dim]Not found (already clean):[/dim]")
+            for file in files_not_found:
+                console.print(f"  - {file}")
+
+        console.print("\n[green]✓ Tracking reset complete![/green]")
+        console.print("[dim]Note: llm_cache.json was preserved (contains cached analysis results)[/dim]\n")
+
+        return  # Exit without processing emails
+
     console.print("\n[bold blue]Job Application Tracker[/bold blue]", justify="center")
     console.print("[dim]Scanning Gmail for job-related emails...[/dim]\n")
 
     if dry_run:
         console.print("[yellow]Running in DRY RUN mode - no changes will be made[/yellow]\n")
+
+    mode_display = "LLM (AI-powered)" if mode == "llm" else "Rules-based"
+    console.print(f"[cyan]Analysis mode: {mode_display}[/cyan]\n")
 
     try:
         # Initialize components
@@ -67,10 +122,25 @@ def main(days: int, dry_run: bool):
             parser = EmailParser()
             emails = parser.parse_messages(messages)
 
-            # Step 3: Detect job-related emails
-            progress.update(task, description="Detecting job-related emails...")
-            detector = JobEmailDetector()
-            job_emails = detector.detect_batch(emails)
+            # Step 3: Analyze emails (LLM or rules-based)
+            if mode == "llm":
+                progress.update(task, description="Analyzing emails with LLM...")
+                analyzer = LLMEmailAnalyzer()
+                job_emails = analyzer.analyze_batch(emails)
+            else:
+                # Rules-based approach
+                progress.update(task, description="Detecting job-related emails...")
+                detector = JobEmailDetector()
+                job_emails = detector.detect_batch(emails)
+
+                if job_emails:
+                    progress.update(task, description="Extracting company and position info...")
+                    extractor = InfoExtractor()
+                    classifier = EmailClassifier()
+
+                    for email in job_emails:
+                        email.company, email.position = extractor.extract_all(email)
+                        email.email_type, email.status = classifier.classify(email)
 
             if not job_emails:
                 console.print(
@@ -80,16 +150,7 @@ def main(days: int, dry_run: bool):
 
             console.print(f"[green]Found {len(job_emails)} job-related emails[/green]\n")
 
-            # Step 4: Extract information
-            progress.update(task, description="Extracting company and position info...")
-            extractor = InfoExtractor()
-            classifier = EmailClassifier()
-
-            for email in job_emails:
-                email.company, email.position = extractor.extract_all(email)
-                email.email_type, email.status = classifier.classify(email)
-
-            # Step 5: Load existing applications
+            # Step 4: Load existing applications
             progress.update(task, description="Loading existing applications...")
             if not dry_run:
                 manager = ApplicationManager()
@@ -97,13 +158,13 @@ def main(days: int, dry_run: bool):
             else:
                 existing_apps = []
 
-            # Step 6: Match and update
+            # Step 5: Match and update
             progress.update(task, description="Matching emails to applications...")
             matcher = ApplicationMatcher()
 
             new_applications = 0
             updated_applications = 0
-            skipped_emails = 0
+            skipped_false_positives = 0
 
             for email in job_emails:
                 # Find match
@@ -112,17 +173,26 @@ def main(days: int, dry_run: bool):
                 if match:
                     # Update existing application
                     if not dry_run:
-                        manager.update_application(match, email)
-                        # Update thread_id if not set
-                        if not match.thread_id:
-                            match.thread_id = email.thread_id
-                    updated_applications += 1
+                        updated = manager.update_application(match, email)
+                        if updated:
+                            # Update thread_id if not set
+                            if not match.thread_id:
+                                match.thread_id = email.thread_id
+                            updated_applications += 1
+                    else:
+                        updated_applications += 1
                 else:
                     # Create new application
                     if not dry_run:
                         new_app = manager.create_application(email)
-                        existing_apps.append(new_app)
-                    new_applications += 1
+                        if new_app:
+                            existing_apps.append(new_app)
+                            new_applications += 1
+                        else:
+                            # False positive detected
+                            skipped_false_positives += 1
+                    else:
+                        new_applications += 1
 
         # Display summary
         console.print("\n[bold green]Summary:[/bold green]")
@@ -134,6 +204,8 @@ def main(days: int, dry_run: bool):
         table.add_row("Job-related emails found", str(len(job_emails)))
         table.add_row("New applications created", str(new_applications))
         table.add_row("Applications updated", str(updated_applications))
+        if skipped_false_positives > 0:
+            table.add_row("Skipped (false positives)", str(skipped_false_positives))
 
         console.print(table)
 

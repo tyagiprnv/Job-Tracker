@@ -26,6 +26,13 @@ MATCHING_THRESHOLD = int(os.getenv("MATCHING_THRESHOLD", "80"))
 # Logging Configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
+# DeepSeek API Configuration
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+
+if not DEEPSEEK_API_KEY:
+    print("Warning: DEEPSEEK_API_KEY not set in .env file")
+
 # OAuth2 Scopes (combined for single authentication)
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -34,6 +41,15 @@ ALL_SCOPES = GMAIL_SCOPES + SHEETS_SCOPES
 # File paths for OAuth2 credentials and tokens
 CREDENTIALS_FILE = PROJECT_ROOT / "credentials.json"
 GMAIL_TOKEN_FILE = PROJECT_ROOT / "token.json"
+
+# LLM cache file path
+LLM_CACHE_FILE = PROJECT_ROOT / "llm_cache.json"
+
+# False positives tracking file
+FALSE_POSITIVES_FILE = PROJECT_ROOT / "false_positives.json"
+
+# Processed emails tracking file (prevents double-counting)
+PROCESSED_EMAILS_FILE = PROJECT_ROOT / "processed_emails.json"
 
 # Sheet column definitions
 SHEET_COLUMNS = [
