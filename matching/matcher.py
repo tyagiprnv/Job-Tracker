@@ -148,6 +148,9 @@ class ApplicationMatcher:
     ) -> tuple[Optional[Application], int]:
         """Match by company name only if it's recent (within 30 days).
 
+        If both email and application have position data, requires position
+        similarity >= 75% to prevent matching different roles at same company.
+
         Args:
             email: Email to match
             applications: List of applications
@@ -168,9 +171,26 @@ class ApplicationMatcher:
             if app_company == email_company and app.application_date >= recent_threshold:
                 recent_matches.append(app)
 
-        # If exactly one recent match, return it
+        # If exactly one recent match found
         if len(recent_matches) == 1:
-            return recent_matches[0], 70
+            app = recent_matches[0]
+
+            # If both have position data, require similarity
+            if email.position and email.position.strip() and app.position and app.position.strip():
+                position_score = fuzz.ratio(
+                    email.position.lower().strip(),
+                    app.position.lower().strip()
+                )
+                # Only match if positions are similar (75% threshold)
+                if position_score >= 75:
+                    return app, 70
+                else:
+                    # Positions too different - don't match
+                    return None, 0
+
+            # If position missing from either, fall back to company-only match
+            # (handles generic emails like "Thanks for applying")
+            return app, 70
 
         # If multiple matches, can't determine which one
         return None, 0
