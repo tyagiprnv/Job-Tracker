@@ -175,6 +175,9 @@ The application follows a pipeline architecture with **two analysis modes** (mai
 ### OAuth2 Authentication
 **Unified authentication** (config/settings.py:36-40) - Single token.json contains combined scopes for both Gmail (read-only) and Google Sheets APIs, reducing authentication friction.
 
+### Gmail Category Filtering
+**Primary inbox focus** (gmail/fetcher.py:32) - The Gmail search query excludes promotional and social category emails using `-category:promotions -category:social`. This ensures only primary inbox emails are processed, significantly reducing false positives from marketing emails, job alerts, and social network notifications. Updates and Forums categories are still included as they may contain legitimate job application confirmations.
+
 ### File Persistence
 **Five persistent files** in project root (all in .gitignore):
 - `credentials.json` - OAuth2 credentials from Google Cloud Console

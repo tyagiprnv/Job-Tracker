@@ -28,8 +28,8 @@ class EmailFetcher:
         date_str = date_threshold.strftime("%Y/%m/%d")
 
         # Build query
-        # Search for emails after date, exclude sent emails
-        query = f"after:{date_str} -from:me"
+        # Search for emails after date, exclude sent emails and promotional/social categories
+        query = f"after:{date_str} -from:me -category:promotions -category:social"
 
         return query
 

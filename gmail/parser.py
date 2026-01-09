@@ -52,7 +52,7 @@ class EmailParser:
         body = self._extract_body(message["payload"])
 
         # Create Gmail link
-        gmail_link = f"https://mail.google.com/mail/u/0/#inbox/{message_id}"
+        gmail_link = f"https://mail.google.com/mail/u/2/#inbox/{message_id}"
 
         return Email(
             message_id=message_id,
