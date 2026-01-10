@@ -5,7 +5,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from config.settings import SPREADSHEET_ID, GMAIL_SEARCH_DAYS
+from config.settings import SPREADSHEET_ID, GMAIL_SEARCH_DAYS, LLM_PROVIDER, LLM_MODEL
 from gmail.fetcher import EmailFetcher
 from gmail.parser import EmailParser
 from llm.email_analyzer import LLMEmailAnalyzer
@@ -91,6 +91,26 @@ def main(days: int, dry_run: bool, mode: str, reset_tracking: bool):
 
     mode_display = "LLM (AI-powered)" if mode == "llm" else "Rules-based"
     console.print(f"[cyan]Analysis mode: {mode_display}[/cyan]\n")
+
+    # Validate LLM configuration if using LLM mode
+    if mode == "llm":
+        from config.settings import validate_llm_config
+
+        is_valid, error_msg, warning_msg = validate_llm_config()
+
+        if not is_valid:
+            console.print(f"[red]LLM Configuration Error:[/red] {error_msg}\n")
+            console.print("[yellow]Options:[/yellow]")
+            console.print("1. Set LLM_PROVIDER and corresponding API key in .env")
+            console.print("2. Use --mode rules for offline/free analysis\n")
+            console.print("[dim]See .env.example for configuration examples[/dim]")
+            return
+
+        if warning_msg:
+            console.print(f"[yellow]{warning_msg}[/yellow]")
+
+        # Display provider info
+        console.print(f"[dim]Using {LLM_PROVIDER.upper()} provider with model: {LLM_MODEL}[/dim]\n")
 
     try:
         # Initialize components

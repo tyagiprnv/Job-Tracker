@@ -5,7 +5,7 @@ Automatically track your job applications by reading Gmail and updating Google S
 ## Features
 
 - **Dual Analysis Modes:**
-  - **LLM Mode (default):** AI-powered analysis using DeepSeek API (~$0.01/100 emails, highly accurate)
+  - **LLM Mode (default):** AI-powered analysis with 4 provider options (OpenAI, Anthropic, Google, DeepSeek)
   - **Rules Mode:** Keyword-based detection (offline, free, lower accuracy)
 - **Smart Gmail Filtering:** Only processes primary inbox emails (excludes promotions/social tabs)
 - **Intelligent Matching:** Links follow-up emails to existing applications using thread IDs and fuzzy matching
@@ -41,7 +41,8 @@ uv sync
 cp .env.example .env
 # Edit .env and add:
 # - SPREADSHEET_ID (required)
-# - DEEPSEEK_API_KEY (optional, for LLM mode - get from platform.deepseek.com)
+# - LLM_PROVIDER (optional, for LLM mode - choose: openai, anthropic, google, deepseek)
+# - Corresponding API key (e.g., OPENAI_API_KEY, DEEPSEEK_API_KEY)
 ```
 
 ### 5. Run
@@ -90,14 +91,29 @@ Key settings in `.env`:
 # Required
 SPREADSHEET_ID=your_spreadsheet_id_here
 
-# Optional (LLM mode)
-DEEPSEEK_API_KEY=sk-your-key-here      # From platform.deepseek.com
+# LLM Mode Configuration (optional)
+LLM_PROVIDER=deepseek              # Options: openai, anthropic, google, deepseek
+DEEPSEEK_API_KEY=sk-...           # Or OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY
+
+# Advanced: Override default model
+# LLM_MODEL=gpt-4o-mini           # For custom model selection
 
 # Tuning (optional)
 GMAIL_SEARCH_DAYS=60                   # Days to search back
 DETECTION_THRESHOLD=5                  # Rules mode: min score (lower = more emails)
 MATCHING_THRESHOLD=80                  # Fuzzy match threshold (lower = more aggressive)
 ```
+
+### LLM Provider Comparison
+
+| Provider | Cost/100 emails | Speed | JSON Mode | API Key Source |
+|----------|----------------|-------|-----------|----------------|
+| DeepSeek | ~$0.01 | Fast | Native | platform.deepseek.com |
+| Google Gemini | ~$0.15 | Fast | Native | makersuite.google.com |
+| Anthropic Claude | ~$0.25 | Medium | Prompt-based | console.anthropic.com |
+| OpenAI GPT | ~$0.30 | Medium | Native | platform.openai.com |
+
+**Recommendation:** Start with DeepSeek for best cost/performance ratio.
 
 ## How It Works
 
@@ -108,9 +124,9 @@ MATCHING_THRESHOLD=80                  # Fuzzy match threshold (lower = more agg
 4. **Update** - Create/update Google Sheets rows with status progression
 
 ### LLM Mode (Default)
-- Sends email to DeepSeek API with structured prompt
+- Sends email to chosen LLM provider (OpenAI, Anthropic, Google, or DeepSeek) with structured prompt
 - Returns: company, position, status, confidence, reasoning
-- **Persistent cache** (`llm_cache.json`) - previously analyzed emails never re-analyzed
+- **Persistent cache** (`llm_cache.json`) - previously analyzed emails never re-analyzed (provider-agnostic)
 - Accurately extracts actual company name (not ATS platform like "Greenhouse")
 - Context-aware rejection detection, multilingual by default
 
@@ -150,7 +166,7 @@ MATCHING_THRESHOLD=80                  # Fuzzy match threshold (lower = more agg
 | `Spreadsheet not found` | Verify `SPREADSHEET_ID` in `.env` matches your Sheet ID |
 | No emails detected | Lower `DETECTION_THRESHOLD` (e.g., 3-4) or use `--mode llm` |
 | Too many false positives | Raise `DETECTION_THRESHOLD` (e.g., 6-7) or use `--mode llm` |
-| `DEEPSEEK_API_KEY not set` | Add API key to `.env` or use `--mode rules` |
+| `LLM Configuration Error` | Set `LLM_PROVIDER` and corresponding API key in `.env` or use `--mode rules` |
 | Rate limit errors | Script auto-retries; if persists, reduce `GMAIL_MAX_RESULTS` |
 | Emails skipped after spreadsheet switch | Run `--reset-tracking` to clear processed email cache |
 
@@ -160,7 +176,7 @@ MATCHING_THRESHOLD=80                  # Fuzzy match threshold (lower = more agg
 job-tracker/
 ├── main.py                  # CLI entry point
 ├── gmail/                   # Gmail API (fetcher, parser, client)
-├── llm/                     # DeepSeek AI analysis (analyzer, prompts, client)
+├── llm/                     # Multi-provider LLM analysis (analyzer, prompts, client)
 ├── detection/               # Rules-based analysis (detector, classifier, extractor)
 ├── matching/                # Application matching strategies
 ├── sheets/                  # Google Sheets integration

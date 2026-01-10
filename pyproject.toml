@@ -18,4 +18,5 @@ dependencies = [
     "rich>=13.7.0",
     "click>=8.1.7",
     "requests>=2.31.0",
+    "litellm>=1.50.0",
 ]

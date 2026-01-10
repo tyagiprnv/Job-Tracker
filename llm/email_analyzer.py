@@ -5,7 +5,7 @@ from typing import Optional
 from pathlib import Path
 
 from models.email import Email
-from llm.deepseek_client import DeepSeekClient
+from llm.llm_client import LLMClient
 from config.settings import LLM_CACHE_FILE
 
 
@@ -14,7 +14,7 @@ class LLMEmailAnalyzer:
 
     def __init__(self):
         """Initialize analyzer."""
-        self.client = DeepSeekClient()
+        self.client = LLMClient()
         self.cache_file = LLM_CACHE_FILE
         self.cache = self._load_cache()
 
