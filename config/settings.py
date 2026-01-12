@@ -67,7 +67,7 @@ PROVIDER_DEFAULTS = {
         "env_var": "GOOGLE_API_KEY"
     },
     "deepseek": {
-        "model": "deepseek-chat",
+        "model": "deepseek/deepseek-chat",
         "cost_per_100": "$0.01",
         "env_var": "DEEPSEEK_API_KEY"
     }
