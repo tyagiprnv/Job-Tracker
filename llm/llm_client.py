@@ -30,6 +30,10 @@ class LLMClient:
         litellm.drop_params = True  # Drop unsupported params gracefully
         litellm.set_verbose = False  # Disable debug logging
 
+        # Suppress Pydantic serialization warnings from LiteLLM internal models
+        import warnings
+        warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.main")
+
         # Provider-specific JSON mode configuration
         self.json_mode_config = self._get_json_mode_config()
 
