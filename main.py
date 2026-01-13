@@ -13,7 +13,9 @@ from detection.detector import JobEmailDetector
 from detection.extractor import InfoExtractor
 from detection.classifier import EmailClassifier
 from sheets.manager import ApplicationManager
+from sheets.merge_manager import MergeManager
 from matching.matcher import ApplicationMatcher
+from hitl import detect_conflicts, ConflictResolver
 
 console = Console()
 
@@ -41,12 +43,17 @@ console = Console()
     is_flag=True,
     help="Delete tracking files (processed_emails.json, false_positives.json) and exit. Use when switching spreadsheets.",
 )
-def main(days: int, dry_run: bool, mode: str, reset_tracking: bool):
+@click.option(
+    "--non-interactive",
+    is_flag=True,
+    help="Run in non-interactive mode (preserve spreadsheet values on conflicts)",
+)
+def main(days: int, dry_run: bool, mode: str, reset_tracking: bool, non_interactive: bool):
     """Job Application Tracker - Automatically track job applications from Gmail."""
 
     # Handle reset tracking flag first (early exit)
     if reset_tracking:
-        from config.settings import PROCESSED_EMAILS_FILE, FALSE_POSITIVES_FILE
+        from config.settings import PROCESSED_EMAILS_FILE, FALSE_POSITIVES_FILE, MERGED_APPLICATIONS_FILE
 
         console.print("\n[bold yellow]Resetting tracking files...[/bold yellow]\n")
 
@@ -66,6 +73,13 @@ def main(days: int, dry_run: bool, mode: str, reset_tracking: bool):
             files_deleted.append("false_positives.json")
         else:
             files_not_found.append("false_positives.json")
+
+        # Delete merged_applications.json
+        if MERGED_APPLICATIONS_FILE.exists():
+            MERGED_APPLICATIONS_FILE.unlink()
+            files_deleted.append("merged_applications.json")
+        else:
+            files_not_found.append("merged_applications.json")
 
         # Display results
         if files_deleted:
@@ -178,12 +192,31 @@ def main(days: int, dry_run: bool, mode: str, reset_tracking: bool):
             if not dry_run:
                 manager = ApplicationManager()
                 existing_apps = manager.get_all_applications()
+
+                # Step 4.5: Execute merge operations
+                progress.update(task, description="Processing merge requests...")
+                merge_manager = MergeManager()
+                existing_apps, num_merges = merge_manager.execute_merges(existing_apps, dry_run=False)
+
+                if num_merges > 0:
+                    console.print(f"[green]✓ Merged {num_merges} application(s)[/green]\n")
             else:
+                # Dry run - preview merges without executing
+                manager = ApplicationManager()
+                existing_apps = manager.get_all_applications()
+
+                merge_manager = MergeManager()
+                _, num_merges = merge_manager.execute_merges(existing_apps, dry_run=True)
+
+                if num_merges > 0:
+                    console.print(f"[yellow]DRY RUN: Would merge {num_merges} application(s)[/yellow]\n")
+
                 existing_apps = []
 
-            # Step 5: Match and update
+            # Step 5: Match and update (process incrementally to ensure proper matching)
             progress.update(task, description="Matching emails to applications...")
             matcher = ApplicationMatcher()
+            resolver = ConflictResolver(interactive=not non_interactive)
 
             new_applications = 0
             updated_applications = 0
@@ -194,6 +227,37 @@ def main(days: int, dry_run: bool, mode: str, reset_tracking: bool):
                 match, confidence = matcher.find_match(email, existing_apps)
 
                 if match:
+                    # Detect conflicts between spreadsheet and email
+                    conflicts = detect_conflicts(match, email)
+
+                    if conflicts:
+                        # Resolve conflicts (may prompt user in interactive mode)
+                        resolution = resolver.resolve_conflicts(match, email, conflicts)
+
+                        # Check if user wants to create separate entry
+                        if resolution.create_new_entry:
+                            # Apply resolution values to email
+                            email.company = resolution.company
+                            email.position = resolution.position
+
+                            # Create new application instead of updating
+                            if not dry_run:
+                                new_app = manager.create_application(email)
+                                if new_app:
+                                    # Add to existing_apps immediately so subsequent emails can match
+                                    existing_apps.append(new_app)
+                                    new_applications += 1
+                                else:
+                                    # False positive detected
+                                    skipped_false_positives += 1
+                            else:
+                                new_applications += 1
+                            continue  # Skip update logic below
+
+                        # Apply resolution to email before updating
+                        email.company = resolution.company
+                        email.position = resolution.position
+
                     # Update existing application
                     if not dry_run:
                         updated = manager.update_application(match, email)
@@ -209,6 +273,7 @@ def main(days: int, dry_run: bool, mode: str, reset_tracking: bool):
                     if not dry_run:
                         new_app = manager.create_application(email)
                         if new_app:
+                            # Add to existing_apps immediately so subsequent emails can match
                             existing_apps.append(new_app)
                             new_applications += 1
                         else:
@@ -225,6 +290,8 @@ def main(days: int, dry_run: bool, mode: str, reset_tracking: bool):
 
         table.add_row("Total emails scanned", str(len(emails)))
         table.add_row("Job-related emails found", str(len(job_emails)))
+        if num_merges > 0:
+            table.add_row("Applications merged", str(num_merges))
         table.add_row("New applications created", str(new_applications))
         table.add_row("Applications updated", str(updated_applications))
         if skipped_false_positives > 0:

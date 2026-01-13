@@ -9,6 +9,7 @@ Automatically track your job applications by reading Gmail and updating Google S
   - **Rules Mode:** Keyword-based detection (offline, free, lower accuracy)
 - **Smart Gmail Filtering:** Only processes primary inbox emails (excludes promotions/social tabs)
 - **Intelligent Matching:** Links follow-up emails to existing applications using thread IDs and fuzzy matching
+- **Manual Merge:** Consolidate duplicate applications with automatic data combining
 - **Status Tracking:** Automatically classifies emails (applied, interview, rejection, offer) with no downgrades
 - **Multilingual:** Supports English and German emails
 - **Persistent Cache:** LLM results cached - only new emails analyzed (massive cost savings)
@@ -82,6 +83,35 @@ uv run python main.py --reset-tracking
 **LLM vs Rules Mode:**
 - **LLM:** Higher accuracy (95%+), context-aware, costs ~$0.01/100 emails (cached emails free)
 - **Rules:** Offline, free, faster, but lower accuracy and more false positives
+
+## Merging Duplicate Applications
+
+Manually consolidate duplicate job applications:
+
+1. **Flag for merge**: In the Google Sheets "Merge Into Row" column (column 11), enter the target row number
+2. **Run script**: Merges execute automatically before processing new emails
+3. **Automatic cleanup**: Source rows deleted after successful merge
+
+**Example:**
+```bash
+# In spreadsheet: Row 15, column 11 → enter "8" (merge row 15 into row 8)
+uv run python main.py
+# Result: Row 15 merged into row 8, row 15 deleted
+```
+
+**Merge behavior:**
+- Application Date → Earliest
+- Status → Most progressed
+- Email Count → Sum
+- Latest Email Date → Most recent
+- Gmail Link → From latest email
+- Notes → Combined
+- Thread IDs → Combined (new emails match either)
+
+**Validation prevents:**
+- Self-merge, circular merges, chain merges, invalid targets
+
+**Preview:** `uv run python main.py --dry-run`
 
 ## Configuration
 

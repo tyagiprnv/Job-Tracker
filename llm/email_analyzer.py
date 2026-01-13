@@ -17,6 +17,7 @@ class LLMEmailAnalyzer:
         self.client = LLMClient()
         self.cache_file = LLM_CACHE_FILE
         self.cache = self._load_cache()
+        self.all_emails = []  # Store all emails for thread context
 
     def analyze(self, email: Email) -> bool:
         """Analyze email and populate fields.
@@ -32,16 +33,20 @@ class LLMEmailAnalyzer:
             self._apply_cached_result(email, self.cache[email.message_id])
             return True
 
+        # Build thread context from previous emails in the same thread
+        thread_context = self._build_thread_context(email)
+
         # Call LLM
         result = self.client.analyze_email(
-            subject=email.subject, body=email.body, sender=email.sender_email
+            subject=email.subject,
+            body=email.body,
+            sender=email.sender_email,
+            thread_context=thread_context,
         )
 
         if not result:
             # Fallback to rules-based if LLM fails
-            print(
-                f"LLM failed for {email.message_id}, using rules fallback"
-            )
+            print(f"LLM failed for {email.message_id}, using rules fallback")
             return self._fallback_to_rules(email)
 
         # Cache result
@@ -99,6 +104,49 @@ class LLMEmailAnalyzer:
         else:
             return "application"
 
+    def _build_thread_context(self, email: Email) -> str:
+        """Build context from previous emails in the same thread.
+
+        Args:
+            email: Current email being analyzed
+
+        Returns:
+            str: Thread context string (empty if no thread emails found)
+        """
+        if not email.thread_id:
+            return ""
+
+        # Find other emails in the same thread
+        thread_emails = []
+        for other_email in self.all_emails:
+            if (
+                other_email.thread_id == email.thread_id
+                and other_email.message_id != email.message_id
+                and other_email.date < email.date  # Only previous emails
+            ):
+                thread_emails.append(other_email)
+
+        # Also check cache for thread emails with extracted info
+        thread_info = []
+        for other_email in thread_emails:
+            if other_email.message_id in self.cache:
+                cached = self.cache[other_email.message_id]
+                if cached.get("is_job_related") and cached.get("company"):
+                    thread_info.append(
+                        f"  - Earlier email: Company={cached.get('company')}, "
+                        f"Position={cached.get('position')}, "
+                        f"Status={cached.get('status')}"
+                    )
+
+        if not thread_info:
+            return ""
+
+        return (
+            "THREAD CONTEXT (previous emails in this conversation):\n"
+            + "\n".join(thread_info)
+            + "\n\nUse this context to extract company/position if not mentioned in current email.\n"
+        )
+
     def _fallback_to_rules(self, email: Email) -> bool:
         """Fallback to original rules-based detection.
 
@@ -143,6 +191,9 @@ class LLMEmailAnalyzer:
         Returns:
             list: Job-related emails only
         """
+        # Store all emails for thread context building
+        self.all_emails = emails
+
         job_emails = []
 
         for i, email in enumerate(emails):

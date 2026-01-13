@@ -66,7 +66,7 @@ class LLMClient:
             return {}
 
     def analyze_email(
-        self, subject: str, body: str, sender: str
+        self, subject: str, body: str, sender: str, thread_context: str = ""
     ) -> Optional[Dict]:
         """Analyze email using LLM.
 
@@ -74,6 +74,7 @@ class LLMClient:
             subject: Email subject
             body: Email body (truncated to 2000 chars)
             sender: Sender email address
+            thread_context: Context from previous emails in thread (optional)
 
         Returns:
             dict: Parsed JSON response or None if error
@@ -81,7 +82,7 @@ class LLMClient:
         # Truncate body to avoid token limits
         body_sample = body[:2000]
 
-        prompt = self._build_prompt(subject, body_sample, sender)
+        prompt = self._build_prompt(subject, body_sample, sender, thread_context)
 
         try:
             # Build messages
@@ -118,13 +119,16 @@ class LLMClient:
             print(f"Error calling {self.provider.upper()} API: {e}")
             return None
 
-    def _build_prompt(self, subject: str, body: str, sender: str) -> str:
+    def _build_prompt(
+        self, subject: str, body: str, sender: str, thread_context: str = ""
+    ) -> str:
         """Build analysis prompt.
 
         Args:
             subject: Email subject
             body: Email body sample
             sender: Sender email address
+            thread_context: Context from previous emails in thread
 
         Returns:
             str: Formatted prompt
@@ -132,5 +136,5 @@ class LLMClient:
         from llm.prompts import EMAIL_ANALYSIS_PROMPT
 
         return EMAIL_ANALYSIS_PROMPT.format(
-            subject=subject, body=body, sender=sender
+            subject=subject, body=body, sender=sender, thread_context=thread_context
         )

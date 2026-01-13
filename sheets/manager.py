@@ -134,6 +134,13 @@ class ApplicationManager:
             return False
 
         # Work with fresh data from spreadsheet (current_app)
+        # IMPORTANT: Update company and position from email (may have been resolved via HITL)
+        if email.company and email.company not in ["Unknown", ""]:
+            current_app.company = email.company
+
+        if email.position and email.position not in ["Unknown Position", "Unknown", ""]:
+            current_app.position = email.position
+
         # IMPORTANT: Preserve application_date and ensure it's the EARLIEST date
         if email.date < current_app.application_date:
             # This email is earlier than our current application date - update to earliest
@@ -267,3 +274,175 @@ class ApplicationManager:
 
         # Application not found (may have been manually deleted)
         return None
+
+    def create_applications_batch(self, emails: list[Email]) -> tuple[int, int]:
+        """Create multiple applications in a single batch operation.
+
+        Args:
+            emails: List of Email objects to create applications from
+
+        Returns:
+            tuple: (num_created, num_skipped) counts
+        """
+        # Filter out already processed emails and false positives
+        rows_to_add = []
+        created_apps = []
+
+        for email in emails:
+            # Check if this email was already processed
+            if self.processed_emails.is_processed(email.message_id):
+                print(
+                    f"Skipping already processed email: {email.company} - {email.position} "
+                    f"(message: {email.message_id[:8]}...)"
+                )
+                continue
+
+            # Check if this is a known false positive
+            if self.false_positives.is_false_positive(
+                email.message_id, email.company or "Unknown", email.position or "Unknown Position"
+            ):
+                print(
+                    f"Skipping false positive: {email.company} - {email.position} "
+                    f"(previously deleted by user)"
+                )
+                continue
+
+            application = Application(
+                company=email.company or "Unknown",
+                position=email.position or "Unknown Position",
+                application_date=email.date,
+                current_status=email.status or "Applied",
+                last_updated=email.date,
+                email_count=1,
+                latest_email_date=email.date,
+                notes="",
+                gmail_link=email.gmail_link,
+                thread_id=email.thread_id,
+            )
+
+            rows_to_add.append(application.to_row())
+            created_apps.append((application, email))
+
+        # Batch add to sheet
+        if rows_to_add:
+            self.client.append_rows(rows_to_add)
+
+            # Mark emails as processed
+            for application, email in created_apps:
+                self.processed_emails.mark_processed(email.message_id)
+                print(f"Created: {application.company} - {application.position}")
+
+        num_created = len(rows_to_add)
+        num_skipped = len(emails) - num_created
+
+        return num_created, num_skipped
+
+    def update_applications_batch(
+        self, updates: list[tuple[Application, Email]]
+    ) -> tuple[int, int]:
+        """Update multiple applications in a single batch operation.
+
+        Args:
+            updates: List of (application, email) tuples to update
+
+        Returns:
+            tuple: (num_updated, num_skipped) counts
+        """
+        # Prepare batch updates
+        batch_updates = []
+        updated_apps = []
+
+        for application, email in updates:
+            # Check if this email was already processed
+            if self.processed_emails.is_processed(email.message_id):
+                print(
+                    f"Skipping already processed email: {application.company} - {application.position} "
+                    f"(message: {email.message_id[:8]}...)"
+                )
+                continue
+
+            # Re-find the application to get current row number and fresh data
+            current_app = self._find_application_by_identity(application)
+
+            if not current_app:
+                # Application was manually deleted - record as false positive
+                print(
+                    f"Warning: {application.company} - {application.position} was manually deleted. "
+                    f"Recording as false positive (won't be re-created)."
+                )
+                self.false_positives.add_false_positive(
+                    email.message_id,
+                    application.company,
+                    application.position,
+                )
+                # Mark as processed so we don't keep trying
+                self.processed_emails.mark_processed(email.message_id)
+                continue
+
+            # Work with fresh data from spreadsheet (current_app)
+            # IMPORTANT: Update company and position from email (may have been resolved via HITL)
+            if email.company and email.company not in ["Unknown", ""]:
+                current_app.company = email.company
+
+            if email.position and email.position not in ["Unknown Position", "Unknown", ""]:
+                current_app.position = email.position
+
+            # IMPORTANT: Preserve application_date and ensure it's the EARLIEST date
+            if email.date < current_app.application_date:
+                current_app.application_date = email.date
+
+            # Check if status should be updated
+            new_status = email.status
+            current_status = current_app.current_status
+
+            # Determine if status update is allowed
+            should_update_status = (
+                current_status not in TERMINAL_STATUSES
+                and self._should_update_status(current_status, new_status)
+            )
+
+            if should_update_status:
+                # Update status
+                current_app.current_status = new_status
+                print(f"Updating status for {current_app.company}: {current_status} -> {new_status}")
+            else:
+                # Status update not allowed (terminal or downgrade)
+                if current_status in TERMINAL_STATUSES:
+                    print(
+                        f"Preserving terminal status for {current_app.company}: {current_status} "
+                        f"(not updating to {new_status})"
+                    )
+                else:
+                    print(
+                        f"Preserving status for {current_app.company}: {current_status} "
+                        f"(would downgrade to {new_status})"
+                    )
+
+            # Always update metadata (regardless of status update)
+            current_app.email_count += 1
+            current_app.latest_email_date = max(email.date, current_app.latest_email_date or email.date)
+            current_app.last_updated = email.date
+            if email.gmail_link:
+                current_app.gmail_link = email.gmail_link
+
+            # Add to batch update list
+            if current_app.row_number:
+                cell_range = f"A{current_app.row_number}:J{current_app.row_number}"
+                batch_updates.append({"range": cell_range, "values": [current_app.to_row()]})
+                updated_apps.append((current_app, email))
+
+        # Execute batch update
+        if batch_updates:
+            self.client.batch_update(batch_updates)
+
+            # Mark emails as processed
+            for current_app, email in updated_apps:
+                self.processed_emails.mark_processed(email.message_id)
+                print(
+                    f"Updated: {current_app.company} - {current_app.position} -> {current_app.current_status}"
+                )
+
+        num_updated = len(batch_updates)
+        num_skipped = len(updates) - num_updated
+
+        return num_updated, num_skipped

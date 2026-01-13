@@ -130,6 +130,9 @@ FALSE_POSITIVES_FILE = PROJECT_ROOT / "false_positives.json"
 # Processed emails tracking file (prevents double-counting)
 PROCESSED_EMAILS_FILE = PROJECT_ROOT / "processed_emails.json"
 
+# Merged applications tracking file (tracks merged thread IDs)
+MERGED_APPLICATIONS_FILE = PROJECT_ROOT / "merged_applications.json"
+
 # Sheet column definitions
 SHEET_COLUMNS = [
     "Company",
@@ -141,6 +144,8 @@ SHEET_COLUMNS = [
     "Latest Email Date",
     "Notes",
     "Gmail Link",
+    "Thread ID",
+    "Merge Into Row",
 ]
 
 # Status values (ordered by progression)

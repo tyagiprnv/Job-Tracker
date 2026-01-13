@@ -36,6 +36,39 @@ uv run python main.py --reset-tracking
 uv run python main.py --mode llm --days 15 --dry-run
 ```
 
+### Merging Duplicate Applications
+
+To merge duplicate applications manually:
+
+1. Open the Google Sheets spreadsheet
+2. In the "Merge Into Row" column (column 11), enter the target row number
+3. Run the script normally - merges execute before processing new emails
+4. Source rows are automatically deleted after merge
+
+**Example:** If row 15 is a duplicate of row 8:
+- In row 15, column 11: Enter "8"
+- Run: `uv run python main.py`
+- Result: Row 15 data merged into row 8, row 15 deleted
+
+**What gets merged:**
+- Application Date: Earliest date kept
+- Status: Most progressed status kept (based on STATUS_VALUES order)
+- Email Count: Sum of both
+- Latest Email Date: Most recent kept
+- Gmail Link: From most recent email
+- Notes: Concatenated with " | " separator
+- Thread IDs: Combined (future emails match either thread)
+
+**Validation prevents:**
+- Self-merge (row merging into itself)
+- Circular merge (A→B, B→A)
+- Chain merge (A→B, B→C) - resolve target first
+- Invalid/missing target row
+
+**Preview merges:** Use `--dry-run` to preview without executing
+
+**Reset merge tracking:** Use `--reset-tracking` (also resets merge history)
+
 ### Google Cloud Setup Requirements
 1. Create OAuth2 credentials (`credentials.json`) for Gmail API + Google Sheets API
 2. Place `credentials.json` in project root
@@ -78,23 +111,24 @@ The application follows a pipeline architecture with **two analysis modes** (mai
 **Common Steps (both modes):**
 1. **Fetch** (gmail/fetcher.py) - Retrieve emails from Gmail API
 2. **Parse** (gmail/parser.py) - Extract sender, subject, body, thread_id from raw messages
+3. **Merge** (sheets/merge_manager.py) - Execute any pending manual merge requests from spreadsheet
 
 **LLM Mode Pipeline** (`--mode llm`, default):
-3. **Analyze** (llm/email_analyzer.py) - Single LLM call per email extracts:
+4. **Analyze** (llm/email_analyzer.py) - Single LLM call per email extracts:
    - Job-related classification
    - Company name (actual employer, not ATS)
    - Position title
    - Application status
    - Confidence score and reasoning
-4. **Match** (matching/matcher.py) - Link emails to existing applications
-5. **Update** (sheets/manager.py) - Create new or update existing spreadsheet rows
+5. **Match** (matching/matcher.py) - Link emails to existing applications (checks merged thread IDs)
+6. **Update** (sheets/manager.py) - Create new or update existing spreadsheet rows
 
 **Rules Mode Pipeline** (`--mode rules`):
-3. **Detect** (detection/detector.py) - Score emails using weighted keyword matching (threshold: 5)
-4. **Extract** (detection/extractor.py) - Pull company name and position using regex
-5. **Classify** (detection/classifier.py) - Determine email type and status using keywords
-6. **Match** (matching/matcher.py) - Link emails to existing applications
-7. **Update** (sheets/manager.py) - Create new or update existing spreadsheet rows
+4. **Detect** (detection/detector.py) - Score emails using weighted keyword matching (threshold: 5)
+5. **Extract** (detection/extractor.py) - Pull company name and position using regex
+6. **Classify** (detection/classifier.py) - Determine email type and status using keywords
+7. **Match** (matching/matcher.py) - Link emails to existing applications (checks merged thread IDs)
+8. **Update** (sheets/manager.py) - Create new or update existing spreadsheet rows
 
 ### LLM Analysis (Default Mode)
 
@@ -347,15 +381,21 @@ detection/       # Rules-based email analysis (--mode rules)
 └── extractor.py # Extract company and position from text
 
 matching/        # Application matching logic (both modes)
-└── matcher.py   # 4-strategy matching algorithm
+└── matcher.py   # 4-strategy matching algorithm with merged thread ID support
 
 sheets/          # Google Sheets integration (both modes)
 ├── client.py    # Low-level Sheets API wrapper
-└── manager.py   # High-level application CRUD operations
+├── manager.py   # High-level application CRUD operations
+└── merge_manager.py  # Manual merge execution logic (NEW)
+
+tracking/        # Persistent state trackers (both modes)
+├── processed_emails.py  # Processed message IDs
+├── merged_applications.py  # Merged thread ID mappings (NEW)
+└── (false_positives tracker in detection/)
 
 models/          # Data structures (both modes)
 ├── email.py     # Email data model
-└── application.py # Application data model
+└── application.py # Application data model (with merge support)
 
 utils/           # Helper functions (both modes)
 └── text_utils.py # Text normalization and keyword matching
@@ -368,6 +408,7 @@ token.json            # OAuth2 access tokens (auto-generated on first run)
 llm_cache.json        # LLM analysis cache (auto-generated, persistent)
 processed_emails.json # Processed message IDs tracker (use --reset-tracking to clear)
 false_positives.json  # False positives tracker (use --reset-tracking to clear)
+merged_applications.json  # Merged thread ID mappings (auto-generated, use --reset-tracking to clear)
 ```
 
 ## Testing and Debugging
