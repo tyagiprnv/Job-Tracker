@@ -1,18 +1,16 @@
 # Job Application Tracker
 
-Automatically track your job applications by reading Gmail and updating Google Sheets.
+Automatically track job applications by reading Gmail and updating Google Sheets with AI-powered analysis.
 
 ## Features
 
-- **Dual Analysis Modes:**
-  - **LLM Mode (default):** AI-powered analysis with 4 provider options (OpenAI, Anthropic, Google, DeepSeek)
-  - **Rules Mode:** Keyword-based detection (offline, free, lower accuracy)
-- **Smart Gmail Filtering:** Only processes primary inbox emails (excludes promotions/social tabs)
-- **Intelligent Matching:** Links follow-up emails to existing applications using thread IDs and fuzzy matching
-- **Manual Merge:** Consolidate duplicate applications with automatic data combining
-- **Status Tracking:** Automatically classifies emails (applied, interview, rejection, offer) with no downgrades
-- **Multilingual:** Supports English and German emails
-- **Persistent Cache:** LLM results cached - only new emails analyzed (massive cost savings)
+- **Dual Analysis Modes:** AI-powered (LLM) with 4 providers or keyword-based (rules) for offline use
+- **Conflict Resolution:** Interactive prompts when emails conflict with spreadsheet data, with learning to auto-apply past decisions
+- **Smart Matching:** Links follow-up emails using thread IDs and fuzzy matching (4 strategies)
+- **Manual Merge:** Consolidate duplicate applications directly from spreadsheet
+- **Status Progression:** Forward-only status updates (Applied → Interview → Offer/Rejected)
+- **Multilingual:** Native support for English and German
+- **Persistent Cache:** Only new emails incur API costs (~$0.01 per 100 emails with DeepSeek)
 
 ## Quick Start
 
@@ -40,10 +38,10 @@ uv sync
 ### 4. Configure Environment
 ```bash
 cp .env.example .env
-# Edit .env and add:
+# Edit .env:
 # - SPREADSHEET_ID (required)
-# - LLM_PROVIDER (optional, for LLM mode - choose: openai, anthropic, google, deepseek)
-# - Corresponding API key (e.g., OPENAI_API_KEY, DEEPSEEK_API_KEY)
+# - For LLM mode (optional): Set LLM_PROVIDER (openai/anthropic/google/deepseek) + API key
+# - Or use --mode rules for offline operation (no API needed)
 ```
 
 ### 5. Run
@@ -55,19 +53,22 @@ uv run python main.py
 ## Usage
 
 ```bash
-# Default: LLM mode, last 60 days
+# Default: LLM mode, last 60 days, interactive
 uv run python main.py
 
 # Rules mode (offline, free)
 uv run python main.py --mode rules
 
+# Non-interactive mode (auto-resolve conflicts)
+uv run python main.py --non-interactive
+
 # Custom date range
 uv run python main.py --days 30
 
-# Preview without updating (dry-run)
+# Preview without updating
 uv run python main.py --dry-run
 
-# Reset tracking (when switching spreadsheets)
+# Reset tracking (switching spreadsheets/clear learned resolutions)
 uv run python main.py --reset-tracking
 ```
 
@@ -77,41 +78,48 @@ uv run python main.py --reset-tracking
 |--------|-------------|---------|
 | `--mode llm\|rules` | Analysis mode: AI-powered or keyword-based | `llm` |
 | `--days N` | Days to search back | `60` |
-| `--dry-run` | Preview only, don't update sheet | - |
-| `--reset-tracking` | Clear processed email tracking | - |
+| `--dry-run` | Preview only, no spreadsheet updates | - |
+| `--non-interactive` | Auto-resolve conflicts (keep spreadsheet values) | - |
+| `--reset-tracking` | Clear tracking and learned resolutions | - |
 
-**LLM vs Rules Mode:**
-- **LLM:** Higher accuracy (95%+), context-aware, costs ~$0.01/100 emails (cached emails free)
-- **Rules:** Offline, free, faster, but lower accuracy and more false positives
+**Mode Comparison:**
+- **LLM:** 95%+ accuracy, context-aware, ~$0.01/100 new emails (DeepSeek)
+- **Rules:** Offline, free, faster, but lower accuracy
 
-## Merging Duplicate Applications
+## Manual Merging
 
-Manually consolidate duplicate job applications:
+Consolidate duplicate applications directly in the spreadsheet:
 
-1. **Flag for merge**: In the Google Sheets "Merge Into Row" column (column 11), enter the target row number
-2. **Run script**: Merges execute automatically before processing new emails
-3. **Automatic cleanup**: Source rows deleted after successful merge
+1. Enter target row number in "Merge Into Row" column (column 11)
+2. Run the script - merges execute before processing new emails
+3. Source row automatically deleted after successful merge
 
-**Example:**
-```bash
-# In spreadsheet: Row 15, column 11 → enter "8" (merge row 15 into row 8)
-uv run python main.py
-# Result: Row 15 merged into row 8, row 15 deleted
-```
+**Example:** Row 15, column 11 → enter "8" → row 15 merges into row 8
 
-**Merge behavior:**
-- Application Date → Earliest
-- Status → Most progressed
-- Email Count → Sum
-- Latest Email Date → Most recent
-- Gmail Link → From latest email
-- Notes → Combined
-- Thread IDs → Combined (new emails match either)
+**Merge logic:**
+- Date: Earliest | Status: Most progressed | Emails: Sum | Link: Latest
+- Notes: Combined with " | " separator
+- Thread IDs: Combined (future emails match either thread)
 
-**Validation prevents:**
-- Self-merge, circular merges, chain merges, invalid targets
+**Validation:** Prevents self-merge, circular merges, chain merges, invalid targets
 
-**Preview:** `uv run python main.py --dry-run`
+**Preview:** Use `--dry-run` to preview merges without executing
+
+## Conflict Resolution
+
+When an email has different company/position info than the spreadsheet, you'll see an interactive prompt:
+
+**Options:**
+1. Keep spreadsheet values
+2. Use email values
+3. Choose individually per field
+4. Create separate entry (new application)
+
+**Learning System:**
+- Your decisions are saved and automatically applied to identical future conflicts
+- Example: If you choose "Google" over "Google Inc." once, that choice is auto-applied next time
+- Clear learned decisions: `uv run python main.py --reset-tracking`
+- Use `--non-interactive` to skip prompts (always keeps spreadsheet values)
 
 ## Configuration
 
@@ -147,87 +155,95 @@ MATCHING_THRESHOLD=80                  # Fuzzy match threshold (lower = more agg
 
 ## How It Works
 
-### Pipeline
-1. **Fetch** - Query Gmail (primary inbox only, excludes promotions/social tabs)
-2. **Analyze** - LLM extracts job details OR rules-based scoring
-3. **Match** - Link to existing applications via thread ID or fuzzy matching
-4. **Update** - Create/update Google Sheets rows with status progression
+**Pipeline:**
+1. **Fetch** - Gmail (primary inbox only, excludes promotions/social)
+2. **Merge** - Execute manual merge requests from spreadsheet
+3. **Analyze** - LLM extraction or rules-based scoring
+4. **Match** - Link to existing applications (4 strategies, checks merged thread IDs)
+5. **Conflict Check** - Detect company/position mismatches
+6. **Resolve** - Interactive prompts or auto-apply saved decisions
+7. **Update** - Create/update spreadsheet with forward-only status progression
 
-### LLM Mode (Default)
-- Sends email to chosen LLM provider (OpenAI, Anthropic, Google, or DeepSeek) with structured prompt
-- Returns: company, position, status, confidence, reasoning
-- **Persistent cache** (`llm_cache.json`) - previously analyzed emails never re-analyzed (provider-agnostic)
-- Accurately extracts actual company name (not ATS platform like "Greenhouse")
-- Context-aware rejection detection, multilingual by default
+**LLM Mode (Default):**
+- Structured prompt → LLM API → JSON response (company, position, status, confidence, reasoning)
+- Persistent cache (`llm_cache.json`) - analyzed emails never re-analyzed, even across provider switches
+- Context-aware: distinguishes real applications from job alerts, extracts employer (not ATS platform)
 
-### Rules Mode
-- Scores emails using weighted keywords and ATS domain detection
-- Threshold: Score ≥ 5 = job-related
-- Faster but less accurate than LLM mode
+**Rules Mode:**
+- Weighted keyword scoring + ATS domain detection (threshold: ≥5 points = job-related)
+- Offline, free, faster, but lower accuracy
 
-### Matching
-1. **Thread ID** (100%) - Same Gmail thread
-2. **Exact** (95%) - Identical company + position
-3. **Fuzzy** (80-90%) - Similar company (≥85%) + position (≥75%)
-4. **Recent** (70%) - Same company within 30 days (if single match)
-
-### Status Progression
-- Forward-only: `Applied → Received → Interview → Offer/Rejected`
-- Terminal statuses (Rejected, Withdrawn, Offer) never updated
+**Matching Strategies:**
+1. Thread ID (100%) - Same Gmail conversation
+2. Exact (95%) - Identical company + position
+3. Fuzzy (80-90%) - Company ≥85% + position ≥75% similar
+4. Recent (70%) - Same company within 30 days (single match only)
 
 ## Spreadsheet Structure
 
+Headers are auto-generated on first run:
+
 | Column | Description |
 |--------|-------------|
-| Company | Company name extracted from email |
+| Company | Company name |
 | Position | Job title |
 | Application Date | First email date |
-| Current Status | Latest status (Applied/Received/Interview/Rejected/Offer) |
+| Current Status | Latest status (forward-only progression) |
 | Last Updated | Date of last status change |
 | Email Count | Number of related emails |
-| Latest Email Date | Most recent email in thread |
+| Latest Email Date | Most recent email date |
 | Gmail Link | Direct link to latest email |
+| Notes | Additional information (merged via " \| ") |
+| Merge Into Row | Enter target row # to merge (column 11) |
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
 | `credentials.json not found` | Download OAuth2 credentials from Google Cloud Console |
-| `Spreadsheet not found` | Verify `SPREADSHEET_ID` in `.env` matches your Sheet ID |
-| No emails detected | Lower `DETECTION_THRESHOLD` (e.g., 3-4) or use `--mode llm` |
-| Too many false positives | Raise `DETECTION_THRESHOLD` (e.g., 6-7) or use `--mode llm` |
-| `LLM Configuration Error` | Set `LLM_PROVIDER` and corresponding API key in `.env` or use `--mode rules` |
-| Rate limit errors | Script auto-retries; if persists, reduce `GMAIL_MAX_RESULTS` |
-| Emails skipped after spreadsheet switch | Run `--reset-tracking` to clear processed email cache |
+| `Spreadsheet not found` | Verify `SPREADSHEET_ID` in `.env` matches Sheet ID |
+| No emails detected | Use `--mode llm` or lower `DETECTION_THRESHOLD` (e.g., 3-4) |
+| Too many false positives | Use `--mode llm` or raise `DETECTION_THRESHOLD` (e.g., 6-7) |
+| Too many conflict prompts | Use `--non-interactive` or let system learn from your decisions |
+| Wrong auto-resolution | Run `--reset-tracking` to clear learned decisions |
+| Emails skipped after switching sheets | Run `--reset-tracking` to clear processed email cache |
+| `LLM Configuration Error` | Set `LLM_PROVIDER` + API key in `.env` or use `--mode rules` |
+| Rate limits | Script auto-retries; reduce `GMAIL_MAX_RESULTS` if persists |
 
 ## Project Structure
 
 ```
 job-tracker/
-├── main.py                  # CLI entry point
-├── gmail/                   # Gmail API (fetcher, parser, client)
-├── llm/                     # Multi-provider LLM analysis (analyzer, prompts, client)
-├── detection/               # Rules-based analysis (detector, classifier, extractor)
-├── matching/                # Application matching strategies
-├── sheets/                  # Google Sheets integration
-├── config/                  # Settings and keywords
-└── models/                  # Email and Application data models
+├── main.py                          # CLI entry point
+├── config/                          # Settings and keywords
+├── auth/                            # OAuth2 authentication
+├── gmail/                           # Gmail API (fetcher, parser, client)
+├── llm/                             # Multi-provider LLM analysis
+├── detection/                       # Rules-based analysis
+├── matching/                        # Application matching (4 strategies)
+├── sheets/                          # Google Sheets + merge manager
+├── hitl/                            # Conflict detection and resolution
+├── tracking/                        # State trackers (emails, merges, conflicts)
+├── models/                          # Data structures (Email, Application)
+└── utils/                           # Text utilities
 
 # Auto-generated files (gitignored):
-├── credentials.json         # OAuth2 creds (download from GCP)
-├── token.json              # OAuth2 tokens (auto-created)
-├── llm_cache.json          # LLM analysis cache (persistent)
-├── processed_emails.json   # Processed IDs (--reset-tracking to clear)
-└── false_positives.json    # Deleted apps tracker (--reset-tracking to clear)
+├── credentials.json                 # OAuth2 creds (from Google Cloud Console)
+├── token.json                       # OAuth2 tokens (auto-created)
+├── llm_cache.json                   # LLM analysis cache
+├── processed_emails.json            # Processed IDs
+├── false_positives.json             # Deleted apps
+├── merged_applications.json         # Merge history
+└── conflict_resolutions.json        # Learned conflict decisions
 ```
 
 ## Privacy & Security
 
-- Read-only Gmail access (never sends/modifies emails)
-- Local OAuth tokens only
-- No external data sharing (Gmail ↔ Google Sheets only)
-- All credentials gitignored
+- **Read-only Gmail access** - never sends or modifies emails
+- **Local-only** - OAuth tokens stored locally, all credentials gitignored
+- **Data flow** - Gmail → Local analysis → Google Sheets (no external sharing)
+- **LLM mode** - Email metadata sent to chosen provider API (subject, body excerpt, sender)
 
 ## License
 
-MIT License
+MIT
