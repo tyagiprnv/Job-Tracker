@@ -23,5 +23,11 @@ false_positives.json
 # Processed emails tracking
 processed_emails.json
 
+# Merged applications tracking
+merged_applications.json
+
+# Conflict resolutions tracking
+conflict_resolutions.json
+
 # Logs
 *.log

@@ -133,6 +133,9 @@ PROCESSED_EMAILS_FILE = PROJECT_ROOT / "processed_emails.json"
 # Merged applications tracking file (tracks merged thread IDs)
 MERGED_APPLICATIONS_FILE = PROJECT_ROOT / "merged_applications.json"
 
+# Conflict resolutions tracking file (tracks user HITL decisions)
+CONFLICT_RESOLUTIONS_FILE = PROJECT_ROOT / "conflict_resolutions.json"
+
 # Sheet column definitions
 SHEET_COLUMNS = [
     "Company",

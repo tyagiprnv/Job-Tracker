@@ -41,7 +41,7 @@ console = Console()
 @click.option(
     "--reset-tracking",
     is_flag=True,
-    help="Delete tracking files (processed_emails.json, false_positives.json) and exit. Use when switching spreadsheets.",
+    help="Delete tracking files (processed_emails.json, false_positives.json, merged_applications.json, conflict_resolutions.json) and exit. Use when switching spreadsheets or clearing learned resolutions.",
 )
 @click.option(
     "--non-interactive",
@@ -53,7 +53,12 @@ def main(days: int, dry_run: bool, mode: str, reset_tracking: bool, non_interact
 
     # Handle reset tracking flag first (early exit)
     if reset_tracking:
-        from config.settings import PROCESSED_EMAILS_FILE, FALSE_POSITIVES_FILE, MERGED_APPLICATIONS_FILE
+        from config.settings import (
+            PROCESSED_EMAILS_FILE,
+            FALSE_POSITIVES_FILE,
+            MERGED_APPLICATIONS_FILE,
+            CONFLICT_RESOLUTIONS_FILE,
+        )
 
         console.print("\n[bold yellow]Resetting tracking files...[/bold yellow]\n")
 
@@ -80,6 +85,13 @@ def main(days: int, dry_run: bool, mode: str, reset_tracking: bool, non_interact
             files_deleted.append("merged_applications.json")
         else:
             files_not_found.append("merged_applications.json")
+
+        # Delete conflict_resolutions.json
+        if CONFLICT_RESOLUTIONS_FILE.exists():
+            CONFLICT_RESOLUTIONS_FILE.unlink()
+            files_deleted.append("conflict_resolutions.json")
+        else:
+            files_not_found.append("conflict_resolutions.json")
 
         # Display results
         if files_deleted:

@@ -272,6 +272,41 @@ Use `--mode rules` for:
 - **Cache format**: JSON with message_id as key
 - Cache is automatically excluded from git (.gitignore)
 
+### Conflict Resolution Learning
+
+The system learns from your conflict resolution decisions and automatically applies them to future identical conflicts.
+
+**How it works:**
+- When you resolve a conflict (e.g., "Google Inc." vs "Google"), your decision is saved
+- Next time the same conflict appears, your saved decision is applied automatically
+- No prompt shown - logged as "Applied saved resolution: Company → 'Google'"
+
+**What gets persisted:**
+- Field name (Company or Position)
+- Spreadsheet value vs email value
+- Your chosen resolution (keep spreadsheet/use email/manual entry)
+
+**Clearing resolutions:**
+```bash
+# Clear all learned resolutions
+uv run python main.py --reset-tracking
+```
+
+**Example:**
+```bash
+# First time: Conflict "Google Inc." vs "Google" → user chooses "Google"
+uv run python main.py
+
+# Second time: Same conflict → automatically resolved to "Google" (no prompt)
+uv run python main.py
+```
+
+**Important notes:**
+- Resolutions are learned even in `--dry-run` mode (allowing you to train the system without making changes)
+- Case and whitespace variations are handled automatically (e.g., "Google Inc." vs "google inc." are treated as the same)
+- Auto-upgrades (Unknown → real value) are NOT saved (these are automatic system behavior)
+- "Create separate entry" choices are NOT saved (these don't resolve conflicts)
+
 ### Choosing an LLM Provider
 
 **Cost Comparison (per 100 emails):**
@@ -301,13 +336,15 @@ If you have `DEEPSEEK_API_KEY` in `.env` without `LLM_PROVIDER`, DeepSeek is use
 When switching to a new spreadsheet, tracking files from the old spreadsheet can cause all emails to be skipped. Use the reset command:
 
 ```bash
-# Reset tracking files (deletes processed_emails.json and false_positives.json)
+# Reset tracking files (deletes processed_emails.json, false_positives.json, merged_applications.json, conflict_resolutions.json)
 uv run python main.py --reset-tracking
 ```
 
 **What gets reset:**
 - `processed_emails.json` - Message IDs that have been processed (allows re-processing all emails)
 - `false_positives.json` - Applications that were deleted (allows re-creating them)
+- `merged_applications.json` - Merged thread ID mappings (clears merge history)
+- `conflict_resolutions.json` - Learned conflict resolution decisions (clears all saved resolutions)
 
 **What is preserved:**
 - `llm_cache.json` - LLM analysis cache (saves API costs on re-runs)
@@ -403,12 +440,13 @@ utils/           # Helper functions (both modes)
 main.py          # CLI entry point and orchestration
 
 # Auto-generated files (in .gitignore)
-credentials.json      # OAuth2 credentials (manual download from GCP)
-token.json            # OAuth2 access tokens (auto-generated on first run)
-llm_cache.json        # LLM analysis cache (auto-generated, persistent)
-processed_emails.json # Processed message IDs tracker (use --reset-tracking to clear)
-false_positives.json  # False positives tracker (use --reset-tracking to clear)
-merged_applications.json  # Merged thread ID mappings (auto-generated, use --reset-tracking to clear)
+credentials.json           # OAuth2 credentials (manual download from GCP)
+token.json                 # OAuth2 access tokens (auto-generated on first run)
+llm_cache.json             # LLM analysis cache (auto-generated, persistent)
+processed_emails.json      # Processed message IDs tracker (use --reset-tracking to clear)
+false_positives.json       # False positives tracker (use --reset-tracking to clear)
+merged_applications.json   # Merged thread ID mappings (auto-generated, use --reset-tracking to clear)
+conflict_resolutions.json  # Conflict resolution decisions (auto-generated, use --reset-tracking to clear)
 ```
 
 ## Testing and Debugging

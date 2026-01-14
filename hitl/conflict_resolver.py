@@ -9,6 +9,7 @@ from rich.panel import Panel
 from models.application import Application
 from models.email import Email
 from hitl.conflict_detector import FieldConflict
+from tracking.conflict_resolutions import ConflictResolutionTracker
 
 
 @dataclass
@@ -32,6 +33,7 @@ class ConflictResolver:
         """
         self.interactive = interactive
         self.console = Console()
+        self.resolution_tracker = ConflictResolutionTracker()
 
     def resolve_conflicts(
         self,
@@ -137,6 +139,44 @@ class ConflictResolver:
         upgrades: list[FieldConflict],
     ) -> ConflictResolution:
         """Show interactive prompt to resolve conflicts."""
+        # Check if ALL conflicts have saved resolutions
+        all_resolved = True
+        resolved_values = {}
+
+        for conflict in conflicts:
+            saved = self.resolution_tracker.find_resolution(
+                conflict.field_name,
+                conflict.spreadsheet_value,
+                conflict.email_value,
+            )
+            if saved:
+                resolved_values[conflict.field_name] = saved["chosen_value"]
+            else:
+                all_resolved = False
+                break
+
+        # If all conflicts have saved resolutions, apply them
+        if all_resolved:
+            for conflict in conflicts:
+                saved = self.resolution_tracker.find_resolution(
+                    conflict.field_name,
+                    conflict.spreadsheet_value,
+                    conflict.email_value,
+                )
+                self.console.print(
+                    f"[dim]Applied saved resolution: {conflict.field_name} → '{saved['chosen_value']}'[/dim]"
+                )
+
+            final_company = resolved_values.get("Company", application.company)
+            final_position = resolved_values.get("Position", application.position)
+
+            return ConflictResolution(
+                company=final_company,
+                position=final_position,
+                user_modified=True,
+            )
+
+        # Otherwise, continue with normal prompt
         self.console.print()
 
         # Header panel
@@ -204,6 +244,15 @@ class ConflictResolver:
                     )
                 elif choice == "1":
                     # Keep spreadsheet, but apply upgrades
+                    # Save resolutions for conflicts
+                    for conflict in conflicts:
+                        self.resolution_tracker.save_resolution(
+                            conflict.field_name,
+                            conflict.spreadsheet_value,
+                            conflict.email_value,
+                            conflict.spreadsheet_value,  # Chosen value
+                            "keep_spreadsheet",
+                        )
                     return self._apply_choice_with_upgrades(
                         application.company, application.position, upgrades
                     )
@@ -252,6 +301,16 @@ class ConflictResolver:
                     final_company = upgrade.email_value
                 elif upgrade.field_name == "Position":
                     final_position = upgrade.email_value
+
+        # Save resolutions for conflicts
+        for conflict in conflicts:
+            self.resolution_tracker.save_resolution(
+                conflict.field_name,
+                conflict.spreadsheet_value,
+                conflict.email_value,
+                conflict.email_value,  # Chosen value
+                "use_email",
+            )
 
         return ConflictResolution(
             company=final_company, position=final_position, user_modified=True
@@ -307,11 +366,18 @@ class ConflictResolver:
                 "Which value?", choices=["s", "e", "m"], default="s", show_choices=True
             )
 
+            # Determine chosen value and resolution type
+            chosen_value = None
+            resolution_type = None
+
             if choice == "s":
                 # Keep spreadsheet (already set from upgrades)
-                pass
+                chosen_value = conflict.spreadsheet_value
+                resolution_type = "keep_spreadsheet"
             elif choice == "e":
                 # Use email value
+                chosen_value = conflict.email_value
+                resolution_type = "use_email"
                 if conflict.field_name == "Company":
                     final_company = conflict.email_value
                 elif conflict.field_name == "Position":
@@ -320,14 +386,28 @@ class ConflictResolver:
                 # Manual entry
                 manual = Prompt.ask(f"Enter {conflict.field_name} manually").strip()
                 if manual:
+                    chosen_value = manual
+                    resolution_type = "manual"
                     if conflict.field_name == "Company":
                         final_company = manual
                     elif conflict.field_name == "Position":
                         final_position = manual
                 else:
+                    # Empty input - keep spreadsheet
+                    chosen_value = conflict.spreadsheet_value
+                    resolution_type = "keep_spreadsheet"
                     self.console.print(
                         "[yellow]Empty input, keeping spreadsheet value[/yellow]"
                     )
+
+            # Save resolution for this field
+            self.resolution_tracker.save_resolution(
+                conflict.field_name,
+                conflict.spreadsheet_value,
+                conflict.email_value,
+                chosen_value,
+                resolution_type,
+            )
 
         return ConflictResolution(
             company=final_company, position=final_position, user_modified=True
