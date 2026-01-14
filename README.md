@@ -243,7 +243,3 @@ job-tracker/
 - **Local-only** - OAuth tokens stored locally, all credentials gitignored
 - **Data flow** - Gmail → Local analysis → Google Sheets (no external sharing)
 - **LLM mode** - Email metadata sent to chosen provider API (subject, body excerpt, sender)
-
-## License
-
-MIT
