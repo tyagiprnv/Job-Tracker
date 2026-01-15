@@ -94,7 +94,7 @@ class SheetsClient:
         if not self.worksheet:
             self.open_spreadsheet()
 
-        self.worksheet.append_row(row)
+        self.worksheet.append_row(row, value_input_option='USER_ENTERED')
 
     @retry_on_rate_limit(max_retries=5, base_delay=1.0)
     def append_rows(self, rows: list[list]):
@@ -125,7 +125,7 @@ class SheetsClient:
 
         # Update all cells in the row (K is column 11 for Merge Into Row)
         cell_range = f"A{row_number}:K{row_number}"
-        self.worksheet.update(cell_range, [row])
+        self.worksheet.update(cell_range, [row], value_input_option='USER_ENTERED')
 
     def update_cell(self, row: int, col: int, value: str):
         """Update a single cell.
@@ -181,4 +181,4 @@ class SheetsClient:
         if not self.worksheet:
             self.open_spreadsheet()
 
-        self.worksheet.batch_update(updates)
+        self.worksheet.batch_update(updates, value_input_option='USER_ENTERED')
